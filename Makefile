@@ -6,11 +6,13 @@ TARGET = x86_64-apple-macosx
 CXX = clang++
 KERN_INCL = $(SDK)/System/Library/Frameworks/Kernel.framework/Headers
 CXXFLAGS = -x c++ -std=c++11 -target $(TARGET) -mkernel \
+	-isysroot $(SDK) \
 	-fno-exceptions -fno-rtti -fno-builtin \
 	-DKERNEL -DKERNEL_PRIVATE -DDRIVER_PRIVATE -DAPPLE -DNeXT \
 	-Wno-inconsistent-missing-override -Wno-deprecated-declarations \
 	-I$(KERN_INCL) -IIntelVMD
 LDFLAGS = -target $(TARGET) -mkernel -nostdlib -static -Wl,-kext \
+	-isysroot $(SDK) \
 	-L$(SDK)/usr/lib -lkmodc++ -lkmod
 
 SRCS = IntelVMD/IntelVMD.cpp IntelVMD/Logic/VMDLogic.cpp

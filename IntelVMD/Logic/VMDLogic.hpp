@@ -1,5 +1,8 @@
 #pragma once
-#include <cstdint>
+// stdint.h (C), NO <cstdint>: el wrapper de libc++ no resuelve al compilar un
+// kext en modo kernel y rompe con "tried including <stdint.h> but didn't find
+// libc++". stdint.h lo resuelve el SDK en ambos entornos (host y kext).
+#include <stdint.h>
 
 // Logica pura del controlador VMD de Intel, extraida de
 // drivers/pci/controller/vmd.c de Linux (GPL) para poder testearla en el host
