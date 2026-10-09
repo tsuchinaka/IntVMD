@@ -77,13 +77,17 @@ VmdLog (
 
   VA_START (Marker, Format);
 
+  VmdTrace ("VL-vsprint-in");
   AsciiVSPrint (Ascii, sizeof (Ascii), Format, Marker);
+  VmdTrace ("VL-vsprint-out");
   VA_END (Marker);
 
   AsciiStrToUnicodeStrS (Ascii, Wide, ARRAY_SIZE (Wide));
+  VmdTrace ("VL-unicode-done");
   if ((gST != NULL) && (gST->ConOut != NULL)) {
     gST->ConOut->OutputString (gST->ConOut, Wide);
   }
+  VmdTrace ("VL-log-done");
 }
 
 /**
