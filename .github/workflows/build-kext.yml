@@ -34,9 +34,18 @@ jobs:
           exit 1
 
       - name: Build
-        run: make all
+        # tee deja el log del compilador en la salida del job: sin esto, si
+        # falla, el error solo existe en el log privado del runner.
+        run: make all 2>&1 | tee build.log
         env:
           SDK: ${{ env.SDK }}
+
+      - name: Subir log de compilacion
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
 
       - name: Syntax check
         run: make check
