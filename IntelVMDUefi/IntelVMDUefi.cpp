@@ -186,6 +186,7 @@ STATIC CONST UINT16  mSupportedDevices[] = { 0x9A0B };
 #define VMD_REG_VMCONFIG     0x44
 #define VMD_REG_VMLOCK       0x70
 #define VMD_CFGBAR_REG       0x10 // offset de BAR0 en config space
+#define VMD_CFGBAR_INDEX     0    // BAR0 en PciIo->Mem.Read (indice de BAR)
 
 // Tamano observado de la CFGBAR en 9A0B (spec / dump de recursos Windows).
 #define VMD_CFGBAR_SIZE      0x2000000ULL  // 32 MB
@@ -294,6 +295,7 @@ EnumerateVmdBus (
         Status = PciIo->Mem.Read (
                           PciIo,
                           EfiPciIoWidthUint32,
+                          VMD_CFGBAR_INDEX, // BAR0 = CFGBAR: el offset ya es relativo a ella
                           Offset,
                           1,
                           &Id
