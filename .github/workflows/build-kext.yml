@@ -1,0 +1,56 @@
+name: build-kext
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # macos-13 es el ultimo runner con Intel: el kext se compila para x86_64.
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select SDK with kernel (KEXT) headers
+        # Los SDK sin version (MacOSX.sdk) redirigen IOPCIDevice.h a
+        # PCIDriverKit y rompen la compilacion de kexts. Hay que usar uno
+        # versionado, p.ej. MacOSX13.sdk.
+        run: |
+          set -euo pipefail
+          ROOT="$(xcode-select -p)/Platforms/MacOSX.platform/Developer/SDKs"
+          for cand in MacOSX14.4.sdk MacOSX14.5.sdk MacOSX14.sdk MacOSX13.3.sdk MacOSX13.sdk; do
+            if [ -d "$ROOT/$cand" ]; then
+              echo "SDK=$ROOT/$cand" >> "$GITHUB_ENV"
+              echo "Usando SDK: $cand"
+              exit 0
+            fi
+          done
+          echo "::error::No se encontro un SDK versionado en $ROOT"
+          exit 1
+
+      - name: Build
+        run: make all
+        env:
+          SDK: ${{ env.SDK }}
+
+      - name: Syntax check
+        run: make check
+        env:
+          SDK: ${{ env.SDK }}
+
+      - name: Verify bundle
+        run: |
+          set -euo pipefail
+          test -f IntelVMD.kext/Contents/MacOS/IntelVMD
+          plutil -lint IntelVMD.kext/Contents/Info.plist
+          file IntelVMD.kext/Contents/MacOS/IntelVMD
+          codesign -dv IntelVMD.kext 2>&1 | head -4
+          otool -hv IntelVMD.kext/Contents/MacOS/IntelVMD | head -3
+
+      - name: Upload kext
+        uses: actions/upload-artifact@v4
+        with:
+          name: IntelVMD-kext
+          path: IntelVMD.kext
