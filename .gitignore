@@ -1,0 +1,5 @@
+*.o
+*.bin
+IntelVMD.kext/
+.DS_Store
+vmd-recon-*/

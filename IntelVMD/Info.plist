@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>IntelVMD</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.vmdmacos.IntelVMD</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>IntelVMD</string>
+	<key>CFBundlePackageType</key>
+	<string>KEXT</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>0.1.0</string>
+	<key>IOKitPersonalities</key>
+	<dict>
+		<key>IntelVMD</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>com.vmdmacos.IntelVMD</string>
+			<key>IOClass</key>
+			<string>IntelVMD</string>
+			<key>IOMatchCategory</key>
+			<string>com.vmdmacos.IntelVMD</string>
+			<key>IOProviderClass</key>
+			<string>IOPCIDevice</string>
+			<!-- IDs de la tabla vmd_ids de Linux vmd.c (8086:XXXX) -->
+			<key>IOPCIPrimaryMatch</key>
+			<string>0x201D8086 0x28C08086 0x28C18086 0x467F8086 0x4C3D8086 0xA77F8086 0x7D0B8086 0xAD0B8086 0x9A0B8086 0xB60B8086 0xB06F8086 0xB07F8086 0xD70B8086 0xD73B8086</string>
+		</dict>
+	</dict>
+	<key>OSBundleCompatibleVersion</key>
+	<string>0.1.0</string>
+	<key>OSBundleLibraries</key>
+	<dict>
+		<key>com.apple.iokit.IOPCIFamily</key>
+		<string>2.9</string>
+		<key>com.apple.kpi.iokit</key>
+		<string>22.0.0</string>
+		<key>com.apple.kpi.libkern</key>
+		<string>22.0.0</string>
+	</dict>
+	<key>OSBundleRequired</key>
+	<string>Root</string>
+</dict>
+</plist>
