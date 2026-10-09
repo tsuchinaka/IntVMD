@@ -70,12 +70,18 @@ jobs:
             echo "build rc=$?"
           } 2>&1 | tee build-driver.log
           rc=${PIPESTATUS[0]}
-          echo "=== lineas del log: $(wc -l < build-driver.log) ==="
+          # Publicar el tail SIN filtrar primero: si la compilacion falla por una
+          # causa no prevista, esto es el unico canal legible sin token.
           {
-            grep -inE "error|undefined reference|no such file|not found|fatal|Traceback|Unsupported|ASSERT|invalid" build-driver.log | head -25
-            echo "--- mismas/ultimas lineas ---"
-            tail -15 build-driver.log
-          } | while IFS= read -r line; do
+            echo "=== tail build-driver.log ($(wc -l < build-driver.log) lineas) ==="
+            tail -60 build-driver.log
+          } 2>&1 | tee -a ci.log | while IFS= read -r line; do
+            echo "::error title=bldtail::$(echo "$line" | tr -d '\r' | cut -c1-220)"
+          done
+          {
+            echo "=== errores ==="
+            grep -inE "error[ :]|undefined reference|No such file|not found|fatal|Traceback|Unsupported|ASSERT|invalid" build-driver.log | head -20
+          } 2>&1 | tee -a ci.log | while IFS= read -r line; do
             echo "::error title=bld::$(echo "$line" | tr -d '\r' | cut -c1-220)"
           done
           exit "${rc:-1}"
@@ -85,7 +91,9 @@ jobs:
           set -eo pipefail
           {
             echo "=== artefacto ==="
-            find Build/IntVMD -name 'IntelVMDUefi.efi' -print -exec file {} \;
+            find Build/IntVMD -name '*.efi' -print -exec file {} \;
+            echo "=== arbol Build/IntVMD ==="
+            find Build/IntVMD -maxdepth 3 -type d | sort
           } 2>&1 | tee -a ci.log
 
       - name: Resumen (cola del log)
