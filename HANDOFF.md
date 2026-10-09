@@ -67,9 +67,3 @@ familia CLIENT, sin bypass de MSI).
 `.github/workflows/build-kext.yml`: push a `main`, PRs y manual.
 Runner `macos-13` (el ultimo Intel; los demas son ARM y el kext es x86_64).
 Sube el `.kext` como artefacto. Primer run en cola al cerrar esta sesion.
-
-## Pendiente de seguridad
-
-Token `ghp_...` compartido en chat: **revocar** en GitHub ->
-Settings -> Developer settings -> Personal access tokens. Copia local en el
-llavero (se pidio no borrarla). No volver a pedir credenciales por chat.
