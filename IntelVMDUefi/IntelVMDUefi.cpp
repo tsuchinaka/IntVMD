@@ -571,6 +571,10 @@ IntelVMDUefiSupported (
   EFI_PCI_IO_PROTOCOL  *PciIo;
   PCI_TYPE00           Pci;
 
+  // Traza de entrada: si el cuelgue esta DENTRO de este Supported (OpenProtocol,
+  // Pci.Read o la conversion del device-path), esta es la ultima linea.
+  VmdTrace ("S-enter");
+
   Status = gBS->OpenProtocol (
                   ControllerHandle,
                   &gEfiPciIoProtocolGuid,
@@ -579,6 +583,7 @@ IntelVMDUefiSupported (
                   ControllerHandle,
                   EFI_OPEN_PROTOCOL_BY_DRIVER
                   );
+  VmdTrace ("S-opened");
   if (Status == EFI_ALREADY_STARTED) {
     VmdLog ("IntelVMD-UEFI: supported: handle %p ya gestionado\n", ControllerHandle);
     return EFI_SUCCESS;
@@ -595,6 +600,7 @@ IntelVMDUefiSupported (
                         sizeof (Pci) / sizeof (UINT32),
                         &Pci
                         );
+  VmdTrace ("S-read");
   if (EFI_ERROR (Status)) {
     gBS->CloseProtocol (
            ControllerHandle,
@@ -625,7 +631,9 @@ IntelVMDUefiSupported (
                  &gEfiDevicePathProtocolGuid,
                  (VOID **)&Dp
                  ))) {
+      VmdTrace ("S-gotdp");
       DpText = VmdDevicePathToAscii (Dp);
+      VmdTrace ("S-dptext");
     }
     VmdLog (
       "IntelVMD-UEFI: supported %04x:%04x -> %r [%a]\n",
