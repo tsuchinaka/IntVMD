@@ -358,6 +358,9 @@ EnumerateVmdBus (
 // Modo diagnostico: conectar los handles uno a uno, trazeando cada paso.
 // ---------------------------------------------------------------------------
 
+// Desactivado en esta build: el auto-connect se reactiva cuando el entry
+// llegue hasta aqui. Se conserva para la siguiente iteracion.
+__attribute__((unused))
 STATIC
 VOID
 VmdDiagnoseConnect (
