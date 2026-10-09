@@ -12,6 +12,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -106,3 +109,21 @@ jobs:
           name: IntelVMDUefi
           path: Build/IntVMD/**/IntelVMDUefi.efi
           if-no-files-found: warn
+
+      # Los artifacts de Actions exigen token; un Release es publico y
+      # descargable sin autenticar. Se reutiliza el tag "uefi-latest".
+      - name: Publicar release (descarga sin token)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eo pipefail
+          f=$(find Build/IntVMD -name 'IntelVMDUefi.efi' | head -1)
+          if [ -z "$f" ]; then echo "sin .efi, no publico"; exit 0; fi
+          cp "$f" IntelVMDUefi.efi
+          ls -l IntelVMDUefi.efi
+          gh release delete uefi-latest --yes --cleanup-tag || true
+          gh release create uefi-latest IntelVMDUefi.efi \
+            -t "IntelVMDUefi (latest)" \
+            -n "Build automatico de $GITHUB_SHA"
+          echo "https://github.com/tsuchinaka/IntVMD/releases/download/uefi-latest/IntelVMDUefi.efi"
