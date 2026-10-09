@@ -565,12 +565,21 @@ ReadOwnArguments (
                        NULL,
                        EFI_OPEN_PROTOCOL_GET_PROTOCOL
                        );
-  if (EFI_ERROR (Status) || (LoadedImage == NULL) || (LoadedImage->LoadOptions == NULL)) {
+  if (EFI_ERROR (Status) || (LoadedImage == NULL)) {
+    return;
+  }
+  if (LoadedImage->LoadOptions == NULL || LoadedImage->LoadOptionsSize == 0) {
     return;
   }
 
-  if (AsciiStrStr ((CONST CHAR8 *)LoadedImage->LoadOptions, "diag") != NULL) {
-    mDiag = TRUE;
+  // OpenCore pasa Arguments como UTF-16 (OcAppendArgumentsToLoadedImage hace
+  // AsciiStrToUnicodeStrS). Comparar "diag" en ASCII contra UTF-16 falla
+  // (d\0i\0a\0g\0): hay que buscar en CHAR16.
+  {
+    STATIC CONST CHAR16 mDiagStr[] = { 0x64, 0x69, 0x61, 0x67, 0 };
+    if (StrStr((CONST CHAR16 *)LoadedImage->LoadOptions, mDiagStr) != NULL) {
+      mDiag = TRUE;
+    }
   }
 }
 
@@ -588,7 +597,7 @@ IntelVMDUefiEntryPoint (
   ReadOwnArguments (ImageHandle);
   VmdTrace ("1-read-args");
 
-  VmdLog ("IntelVMD-UEFI: entry point diag=%u\n", mDiag ? 1U : 0U);
+  VmdLog ("IntelVMD-UEFI: entry point (%a)\n", mDiag ? "diag" : "normal");
   VmdTrace ("2-entry-logged");
 
   // Modo diagnostico (Arguments="diag" en UEFI.Drivers): conecta los handles
