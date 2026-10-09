@@ -580,7 +580,7 @@ IOReturn IntelVMD::setLinkSpeed(tIOPCILinkSpeed linkSpeed, bool retrain) {
 
 IOReturn IntelVMD::getLinkSpeed(tIOPCILinkSpeed *linkSpeed) {
     if (linkSpeed != nullptr) {
-        *linkSpeed = 0;
+        *linkSpeed = (tIOPCILinkSpeed)0;
     }
     return kIOReturnUnsupported;
 }
