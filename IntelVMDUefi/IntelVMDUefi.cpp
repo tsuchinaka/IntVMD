@@ -580,6 +580,7 @@ IntelVMDUefiSupported (
                   EFI_OPEN_PROTOCOL_BY_DRIVER
                   );
   if (Status == EFI_ALREADY_STARTED) {
+    VmdLog ("IntelVMD-UEFI: supported: handle %p ya gestionado\n", ControllerHandle);
     return EFI_SUCCESS;
   }
 
@@ -608,9 +609,16 @@ IntelVMDUefiSupported (
   if (Pci.Hdr.VendorId == INTEL_VMD_VENDOR_ID) {
     if (IsSupportedDevice (Pci.Hdr.DeviceId)) {
       Status = EFI_SUCCESS;
-      VmdLog ("IntelVMD-UEFI: supported 8086:%04x\n", Pci.Hdr.DeviceId);
     }
   }
+  // Traza SIEMPRE la evaluacion: si el cuelgue de OC esta en nuestro
+  // Supported/Start, el fichero muestra el ultimo handle evaluado.
+  VmdLog (
+    "IntelVMD-UEFI: supported %04x:%04x -> %r\n",
+    Pci.Hdr.VendorId,
+    Pci.Hdr.DeviceId,
+    Status
+    );
 
   gBS->CloseProtocol (
          ControllerHandle,
