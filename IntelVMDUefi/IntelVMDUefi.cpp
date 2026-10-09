@@ -590,6 +590,9 @@ IntelVMDUefiSupported (
   }
 
   if (EFI_ERROR (Status)) {
+    // Handles sin PciIo (USB, HD, FV...): OC los evalua igual. Traza muda
+    // para no inundar, pero visible en biseccion.
+    VmdTrace ("S-no-pciio");
     return Status;
   }
 
@@ -911,6 +914,18 @@ IntelVMDUefiEntryPoint (
   VmdLog ("IntelVMD-UEFI: entry point (%a)\n", mDiag ? "diag" : "normal");
   VmdTrace ("2-entry-logged");
 
+  // El binding se instala ANTES del bind proactivo: DriverBindingHandle solo
+  // existe tras instalar el protocolo, y Start lo necesita como AgentHandle
+  // para OpenProtocol(BY_DRIVER). (Antes se llamaba a Start con handle NULL
+  // -> Invalid Parameter y el VMD quedaba sin bindear.)
+  Status = EfiLibInstallDriverBinding (
+             ImageHandle,
+             SystemTable,
+             &mIntelVMDUefiDriverBinding,
+             ImageHandle
+             );
+  VmdTrace ("2b-binding-installed");
+
   // Modo diagnostico (Arguments="diag" en UEFI.Drivers): conecta los handles
   // uno a uno con traza antes/despues. Si el cuelgue original esta en el
   // connect, la ultima linea del fichero identifica el handle culpable.
@@ -923,16 +938,11 @@ IntelVMDUefiEntryPoint (
 
   // Bind proactivo del VMD (corre SIEMPRE, con y sin diag): deja el
   // controlador en nuestras manos antes del connect de OC. Ver VmdBindVmdController.
+  // El binding ya esta instalado (2b): DriverBindingHandle es valido.
   VmdTrace ("3b-bind-start");
   VmdBindVmdController ();
   VmdTrace ("3b-bind-done");
 
-  Status = EfiLibInstallDriverBinding (
-             ImageHandle,
-             SystemTable,
-             &mIntelVMDUefiDriverBinding,
-             ImageHandle
-             );
-  VmdTrace ("4-binding-installed");
+  VmdTrace ("4-entry-done");
   return Status;
 }
