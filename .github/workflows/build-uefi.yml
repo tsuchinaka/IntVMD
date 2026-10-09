@@ -3,9 +3,11 @@ name: build-uefi
 # Compila el driver UEFI de VMD (IntelVMDUefi) con EDK2 y verifica que el
 # paquete EDK2 (DSC/INF/dec + VMDCore) construye en X64. No toca hardware.
 #
-# Diagnostico sin token: los logs de job dan 403, asi que cada paso vuelca con
-# "| tee -a ci.log" y el ultimo paso publica la cola como anotaciones del
-# check-run (legibles sin autenticar).
+# Diagnostico SIN token: los logs de job dan 403 y los artifacts 401. Canales
+# publicos utilizables:
+#   - El log completo se publica como asset del Release "ci-logs".
+#   - El .efi compilado se publica como asset del Release "uefi-latest".
+#   - Ademas se emiten anotaciones ::error (acotadas, pero legibles sin auth).
 on:
   push:
     branches: [main]
@@ -49,9 +51,6 @@ jobs:
             make -C edk2/BaseTools -j"$(nproc)"
           } 2>&1 | tee -a ci.log
 
-      # La salida del build se filtra a si misma y se publica como anotaciones
-      # en vivo: es el unico canal legible sin token. No dependemos de que un
-      # fichero sobreviva hasta el paso de resumen.
       - name: Build del driver
         run: |
           set +e
@@ -65,73 +64,74 @@ jobs:
           {
             echo "=== build driver ==="
             source edk2/edksetup.sh BaseTools
-            echo "edksetup rc=$?"
             build -p IntVMD.dsc -a X64 -t GCC5 -b RELEASE
-            echo "build rc=$?"
           } 2>&1 | tee build-driver.log
           rc=${PIPESTATUS[0]}
-          # Publicar el tail SIN filtrar primero: si la compilacion falla por una
-          # causa no prevista, esto es el unico canal legible sin token.
-          {
-            echo "=== tail build-driver.log ($(wc -l < build-driver.log) lineas) ==="
-            tail -60 build-driver.log
-          } 2>&1 | tee -a ci.log | while IFS= read -r line; do
-            echo "::error title=bldtail::$(echo "$line" | tr -d '\r' | cut -c1-220)"
-          done
-          {
-            echo "=== errores ==="
-            grep -inE "error[ :]|undefined reference|No such file|not found|fatal|Traceback|Unsupported|ASSERT|invalid" build-driver.log | head -20
-          } 2>&1 | tee -a ci.log | while IFS= read -r line; do
-            echo "::error title=bld::$(echo "$line" | tr -d '\r' | cut -c1-220)"
-          done
-          exit "${rc:-1}"
+          echo "$rc" > build.rc
+          echo "=== build rc=$rc, $(wc -l < build-driver.log) lineas ===" | tee -a ci.log
+          # Solo errores reales del compilador (excluye "-Werror" de las flags).
+          grep -nE "error:|error F0|Error |undefined reference|No such file" build-driver.log \
+            | head -30 | tee -a ci.log || true
+          exit 0
+
+      # El log completo como asset publico: es el unico modo fiable de leer el
+      # fallo sin token (las anotaciones se recortan).
+      - name: Publicar log (publico)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          cp build-driver.log build-driver.log.txt 2>/dev/null
+          ls -l build-driver.log.txt 2>/dev/null
+          gh release delete ci-logs --yes --cleanup-tag 2>/dev/null
+          gh release create ci-logs build-driver.log.txt \
+            -t "CI logs" -n "build-driver.log de $GITHUB_SHA" \
+            && echo "log: https://github.com/tsuchinaka/IntVMD/releases/download/ci-logs/build-driver.log.txt"
 
       - name: Verificar artefacto
+        if: always()
         run: |
-          set -eo pipefail
+          set +e
           {
             echo "=== artefacto ==="
-            find Build/IntVMD -name '*.efi' -print -exec file {} \;
-            echo "=== arbol Build/IntVMD ==="
-            find Build/IntVMD -maxdepth 3 -type d | sort
+            find Build/IntVMD -name '*.efi' -print 2>/dev/null
+            echo "=== arbol ==="
+            find Build/IntVMD -maxdepth 4 -type d 2>/dev/null | sort
           } 2>&1 | tee -a ci.log
+
+      - name: Publicar driver (publico)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          f=$(find Build/IntVMD -name 'IntelVMDUefi.efi' 2>/dev/null | head -1)
+          if [ -z "$f" ]; then echo "sin .efi, no publico"; exit 0; fi
+          cp "$f" IntelVMDUefi.efi
+          ls -l IntelVMDUefi.efi
+          gh release delete uefi-latest --yes --cleanup-tag 2>/dev/null
+          gh release create uefi-latest IntelVMDUefi.efi \
+            -t "IntelVMDUefi (latest)" -n "build de $GITHUB_SHA" \
+            && echo "efi: https://github.com/tsuchinaka/IntVMD/releases/download/uefi-latest/IntelVMDUefi.efi"
 
       - name: Resumen (cola del log)
         if: always()
         run: |
           {
-            echo "### Cola del log (ultimas 60 lineas)"
+            echo "### Cola del log (ultimas 30 lineas)"
             echo '```'
-            tail -60 ci.log 2>/dev/null || echo "(sin ci.log)"
+            tail -30 ci.log 2>/dev/null || echo "(sin ci.log)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          tail -40 ci.log 2>/dev/null | while IFS= read -r line; do
+          tail -25 ci.log 2>/dev/null | while IFS= read -r line; do
             echo "::error title=uefi::$(echo "$line" | tr -d '\r' | cut -c1-220)"
           done
           exit 0
 
-      - name: Upload driver
+      - name: Resultado del build
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: IntelVMDUefi
-          path: Build/IntVMD/**/IntelVMDUefi.efi
-          if-no-files-found: warn
-
-      # Los artifacts de Actions exigen token; un Release es publico y
-      # descargable sin autenticar. Se reutiliza el tag "uefi-latest".
-      - name: Publicar release (descarga sin token)
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -eo pipefail
-          f=$(find Build/IntVMD -name 'IntelVMDUefi.efi' | head -1)
-          if [ -z "$f" ]; then echo "sin .efi, no publico"; exit 0; fi
-          cp "$f" IntelVMDUefi.efi
-          ls -l IntelVMDUefi.efi
-          gh release delete uefi-latest --yes --cleanup-tag || true
-          gh release create uefi-latest IntelVMDUefi.efi \
-            -t "IntelVMDUefi (latest)" \
-            -n "Build automatico de $GITHUB_SHA"
-          echo "https://github.com/tsuchinaka/IntVMD/releases/download/uefi-latest/IntelVMDUefi.efi"
+          rc=$(cat build.rc 2>/dev/null || echo 1)
+          echo "build rc=$rc"
+          test "$rc" = "0"
