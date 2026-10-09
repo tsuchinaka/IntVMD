@@ -770,6 +770,90 @@ IntelVMDUefiStop (
 }
 
 // ---------------------------------------------------------------------------
+// Bind proactivo del VMD
+// ---------------------------------------------------------------------------
+
+/** Localiza el controlador VMD (8086:9A0B) y lo bindea directamente con
+nuestro Start, ANTES de que OC recorra los handles.
+
+Motivo (evidencia del log): durante el connect de OC, nuestras evaluaciones
+Supported llegan hasta Pci(0xA,0x0) y ahi se cuelga, sin que nuestro Start sea
+invocado jamas. El siguiente candidato es el propio VMD en Pci(0xE,0x0): todo
+apunta a que el Start del driver VMD del firmware cuelga la maquina. Al
+bindearlo nosotros primero, el handle queda gestionado (BY_DRIVER) y el driver
+del firmware ya no recibe su Start: se elimina el cuelgue por construccion y
+de paso el VMD queda en nuestras manos (Fase F3).
+
+Se llama a Start directamente en vez de ConnectController para que NINGUN otro
+driver (incluido el del firmware) tenga oportunidad de bindearlo antes. */
+STATIC
+VOID
+VmdBindVmdController (
+  VOID
+  )
+{
+  EFI_STATUS           Status;
+  EFI_HANDLE           *Handles;
+  UINTN                Count;
+  UINTN                Index;
+  EFI_PCI_IO_PROTOCOL  *PciIo;
+  PCI_TYPE00           Pci;
+
+  VmdTrace ("B-scan-start");
+  Handles = NULL;
+  Count   = 0;
+  Status = gBS->LocateHandleBuffer (
+                  ByProtocol,
+                  &gEfiPciIoProtocolGuid,
+                  NULL,
+                  &Count,
+                  &Handles
+                  );
+  if (EFI_ERROR (Status) || (Handles == NULL)) {
+    VmdLog ("IntelVMD-UEFI: bind: sin handles PciIo (%r)\n", Status);
+    return;
+  }
+  VmdLog ("IntelVMD-UEFI: bind: %u handles PciIo\n", Count);
+  for (Index = 0; Index < Count; ++Index) {
+    Status = gBS->HandleProtocol (
+                    Handles[Index],
+                    &gEfiPciIoProtocolGuid,
+                    (VOID **)&PciIo
+                    );
+    if (EFI_ERROR (Status) || (PciIo == NULL)) {
+      continue;
+    }
+    Status = PciIo->Pci.Read (
+                          PciIo,
+                          EfiPciIoWidthUint32,
+                          0,
+                          sizeof (Pci) / sizeof (UINT32),
+                          &Pci
+                          );
+    if (EFI_ERROR (Status)) {
+      continue;
+    }
+    if ((Pci.Hdr.VendorId == INTEL_VMD_VENDOR_ID) &&
+        IsSupportedDevice (Pci.Hdr.DeviceId)) {
+      VmdLog (
+        "IntelVMD-UEFI: bind: VMD 8086:%04x en handle %p, Start directo\n",
+        Pci.Hdr.DeviceId,
+        Handles[Index]
+        );
+      Status = IntelVMDUefiStart (
+                 &mIntelVMDUefiDriverBinding,
+                 Handles[Index],
+                 NULL
+                 );
+      VmdLog ("IntelVMD-UEFI: bind: Start -> %r\n", Status);
+      break;
+    }
+  }
+  gBS->FreePool (Handles);
+  VmdTrace ("B-scan-done");
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -836,6 +920,12 @@ IntelVMDUefiEntryPoint (
     VmdDiagnoseConnect ();
     VmdTrace ("3-diag-done");
   }
+
+  // Bind proactivo del VMD (corre SIEMPRE, con y sin diag): deja el
+  // controlador en nuestras manos antes del connect de OC. Ver VmdBindVmdController.
+  VmdTrace ("3b-bind-start");
+  VmdBindVmdController ();
+  VmdTrace ("3b-bind-done");
 
   Status = EfiLibInstallDriverBinding (
              ImageHandle,
