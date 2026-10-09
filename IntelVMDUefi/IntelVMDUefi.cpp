@@ -48,6 +48,7 @@ extern "C" {
 #include <Protocol/DriverBinding.h>
 #include <Protocol/LoadedImage.h>
 #include <Protocol/PciIo.h>
+#include <Protocol/SimpleFileSystem.h>
 }
 
 #include "VMDLogic.hpp"
@@ -55,6 +56,11 @@ extern "C" {
 #define INTEL_VMD_VENDOR_ID  0x8086
 
 STATIC BOOLEAN  mDiag = FALSE;
+
+// Fichero de traza en la ESP del USB (se lee desde Windows sin fotos).
+// Se abre una vez en el entry, se escribe + Flush por linea (a prueba de
+// cuelgues) y no se cierra: el contenido ya esta en disco pase lo que pase.
+STATIC EFI_FILE_PROTOCOL  *mLogFile = NULL;
 
 // Declaracion adelantada: VmdTrace se define mas abajo, pero VmdLog la usa.
 STATIC
@@ -95,8 +101,16 @@ VmdLog (
   if ((gST != NULL) && (gST->ConOut != NULL)) {
     gST->ConOut->OutputString (gST->ConOut, Wide);
   }
+  VmdFileWrite (Ascii);
   VmdTrace ("VL-log-done");
 }
+
+// Declaracion adelantada: VmdFileWrite/VmdLogOpen se definen tras VmdTrace.
+STATIC
+VOID
+VmdFileWrite (
+  IN CONST CHAR8  *Ascii
+  );
 
 /**
   Traza de biseccion: escribe SIEMPRE a la consola del firmware (ConOut
@@ -118,6 +132,95 @@ VmdTrace (
   if ((gST != NULL) && (gST->ConOut != NULL)) {
     gST->ConOut->OutputString (gST->ConOut, Wide);
   }
+  VmdFileWrite (Ascii);
+}
+
+/**
+  Traza persistente: IntelVMDUefi.log en la raiz de la ESP del USB.
+  Se abre una vez en el entry (borrando el arranque anterior), se escribe +
+  Flush por linea (a prueba de cuelgues) y no se cierra: el contenido ya esta
+  en disco pase lo que pase. Asi el diagnostico se lee desde Windows sin
+  depender de fotos.
+**/
+STATIC
+VOID
+VmdFileWrite (
+  IN CONST CHAR8  *Ascii
+  )
+{
+  UINTN  Len;
+
+  if ((mLogFile == NULL) || (Ascii == NULL)) {
+    return;
+  }
+  Len = AsciiStrLen (Ascii);
+  if (Len == 0) {
+    return;
+  }
+  mLogFile->Write (mLogFile, &Len, (VOID *)Ascii);
+  mLogFile->Flush (mLogFile);
+}
+
+STATIC
+VOID
+VmdLogOpen (
+  IN EFI_HANDLE  ImageHandle
+  )
+{
+  EFI_STATUS                 Status;
+  EFI_LOADED_IMAGE_PROTOCOL  *LoadedImage;
+  EFI_SIMPLE_FILE_SYSTEM_PROTOCOL  *Fs;
+  EFI_FILE_PROTOCOL          *Root;
+  EFI_FILE_PROTOCOL          *Old;
+
+  LoadedImage = NULL;
+  Status = gBS->OpenProtocol (
+                  ImageHandle,
+                  &gEfiLoadedImageProtocolGuid,
+                  (VOID **)&LoadedImage,
+                  ImageHandle,
+                  NULL,
+                  EFI_OPEN_PROTOCOL_GET_PROTOCOL
+                  );
+  if (EFI_ERROR (Status) || (LoadedImage == NULL)) {
+    return;
+  }
+  Status = gBS->HandleProtocol (
+                  LoadedImage->DeviceHandle,
+                  &gEfiSimpleFileSystemProtocolGuid,
+                  (VOID **)&Fs
+                  );
+  if (EFI_ERROR (Status) || (Fs == NULL)) {
+    return;
+  }
+  Status = Fs->OpenVolume (Fs, &Root);
+  if (EFI_ERROR (Status) || (Root == NULL)) {
+    return;
+  }
+  // Borrar el log del arranque anterior para un fichero limpio por boot.
+  Status = Root->Open (
+                    Root,
+                    &Old,
+                    (CHAR16 *)L"IntelVMDUefi.log",
+                    EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE,
+                    0
+                    );
+  if (!EFI_ERROR (Status) && (Old != NULL)) {
+    Old->Delete (Old);
+  }
+  Status = Root->Open (
+                    Root,
+                    &mLogFile,
+                    (CHAR16 *)L"IntelVMDUefi.log",
+                    EFI_FILE_MODE_CREATE | EFI_FILE_MODE_READ |
+                    EFI_FILE_MODE_WRITE,
+                    0
+                    );
+  if (EFI_ERROR (Status)) {
+    mLogFile = NULL;
+  }
+  // Root se deja abierto a proposito: el fichero debe sobrevivir a un
+  // cuelgue posterior y su contenido ya esta vaciado con Flush por linea.
 }
 
 // ---------------------------------------------------------------------------
@@ -603,8 +706,9 @@ IntelVMDUefiEntryPoint (
 {
   EFI_STATUS  Status;
 
-  // Cada paso deja marca en la consola del firmware (foto). Si el arranque
-  // se cuelga, la ultima marca visible dice exactamente que llamada cuelga.
+  // Cada paso deja marca en consola + fichero. Si el arranque se cuelga,
+  // la ultima linea de IntelVMDUefi.log dice exactamente que llamada cuelga.
+  VmdLogOpen (ImageHandle);
   VmdTrace ("0-enter");
   ReadOwnArguments (ImageHandle);
   VmdTrace ("1-read-args");
@@ -614,25 +718,12 @@ IntelVMDUefiEntryPoint (
 
   // Modo diagnostico (Arguments="diag" en UEFI.Drivers): conecta los handles
   // uno a uno con traza antes/despues. Si el cuelgue original esta en el
-  // connect, la ultima linea de la foto identifica el handle culpable.
+  // connect, la ultima linea del fichero identifica el handle culpable.
+  // Sin pausa: el fichero ya guarda todo, el arranque sigue solo.
   if (mDiag) {
     VmdTrace ("3-diag-start");
     VmdDiagnoseConnect ();
     VmdTrace ("3-diag-done");
-
-    // Pausa con las trazas en pantalla: el arranque NO sigue hasta pulsar
-    // una tecla. Asi la foto es obligatoria y completa (las lineas de
-    // consola no quedan en ningun fichero).
-    VmdLog ("IntelVMD-UEFI: DIAG completo. Pulsa una tecla para seguir...\n");
-    if ((gST != NULL) && (gST->ConIn != NULL)) {
-      UINTN      Index;
-      EFI_INPUT_KEY  Key;
-
-      gBS->WaitForEvent (1, &gST->ConIn->WaitForKey, &Index);
-      gST->ConIn->ReadKeyStroke (gST->ConIn, &Key);
-    }
-
-    VmdTrace ("3-key-pressed");
   }
 
   Status = EfiLibInstallDriverBinding (
