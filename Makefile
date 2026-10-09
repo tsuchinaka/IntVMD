@@ -16,7 +16,9 @@ LDFLAGS = -target $(TARGET) -mkernel -nostdlib -static -Wl,-kext \
 	-L$(SDK)/usr/lib -lkmodc++ -lkmod
 
 SRCS = IntelVMD/IntelVMD.cpp IntelVMD/Logic/VMDLogic.cpp
-OBJS = IntelVMD.o Logic/VMDLogic.o
+# Los .o van junto a sus .cpp: el directorio Logic/ esta bajo IntelVMD/, no en
+# la raiz (por eso la salida debe ser IntelVMD/Logic/VMDLogic.o).
+OBJS = IntelVMD.o IntelVMD/Logic/VMDLogic.o
 
 check:
 	$(CXX) -fsyntax-only $(CXXFLAGS) IntelVMD/IntelVMD.cpp && echo "SINTAXIS OK"
@@ -24,8 +26,8 @@ check:
 IntelVMD.o: IntelVMD/IntelVMD.cpp IntelVMD/IntelVMD.h IntelVMD/Logic/VMDLogic.hpp
 	$(CXX) $(CXXFLAGS) -c IntelVMD/IntelVMD.cpp -o IntelVMD.o
 
-Logic/VMDLogic.o: IntelVMD/Logic/VMDLogic.cpp IntelVMD/Logic/VMDLogic.hpp
-	$(CXX) $(CXXFLAGS) -c IntelVMD/Logic/VMDLogic.cpp -o Logic/VMDLogic.o
+IntelVMD/Logic/VMDLogic.o: IntelVMD/Logic/VMDLogic.cpp IntelVMD/Logic/VMDLogic.hpp
+	$(CXX) $(CXXFLAGS) -c IntelVMD/Logic/VMDLogic.cpp -o IntelVMD/Logic/VMDLogic.o
 
 IntelVMD.bin: $(OBJS)
 	$(CXX) $(LDFLAGS) -o IntelVMD.bin $(OBJS)
@@ -39,6 +41,6 @@ all: IntelVMD.bin
 	@echo "KEXT LISTO: IntelVMD.kext"
 
 clean:
-	rm -rf IntelVMD.o IntelVMD.bin IntelVMD.kext
+	rm -rf IntelVMD.o IntelVMD/Logic/VMDLogic.o IntelVMD.bin IntelVMD.kext build.log
 
 .PHONY: check all clean
