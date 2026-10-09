@@ -1,8 +1,11 @@
 name: build-uefi
 
-# Compila el driver UEFI de VMD (IntelVMDUefi) con EDK2. No pone nada en un
-# sistema real: solo verifica que el paquete EDK2 (DSC/INF/dec + VMDCore)
-# construye en X64. La validacion en hardware es un paso aparte (OpenCore).
+# Compila el driver UEFI de VMD (IntelVMDUefi) con EDK2 y verifica que el
+# paquete EDK2 (DSC/INF/dec + VMDCore) construye en X64. No toca hardware.
+#
+# Nota de diagnostico: los logs de job requieren token (403). Por eso TODO se
+# vuelca a ci.log y el ultimo paso publica la cola del log como anotaciones del
+# check-run, que si son legibles sin autenticar.
 on:
   push:
     branches: [main]
@@ -15,53 +18,57 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Instalar dependencias de EDK2
+      - name: Dependencias
         run: |
           set -euo pipefail
+          exec > >(tee -a ci.log) 2>&1
           sudo apt-get update
-          sudo apt-get install -y build-essential uuid-dev iasl nasm python3
+          sudo apt-get install -y build-essential uuid-dev iasl nasm python3 python3-pip
 
       - name: Clonar EDK2
         run: |
-          set -euo pipefail
-          # Tag estable (no master): evita que un cambio aguas arriba rompa CI.
+          set -euxo pipefail
+          exec > >(tee -a ci.log) 2>&1
           git clone --depth 1 --branch edk2-stable202411 \
             https://github.com/tianocore/edk2.git edk2
           git -C edk2 submodule update --init --depth 1
 
-      - name: Construir BaseTools
+      - name: BaseTools
         run: |
-          set -euo pipefail
+          set -euxo pipefail
+          exec > >(tee -a ci.log) 2>&1
+          pip3 install --upgrade -r edk2/pip-requirements.txt
           make -C edk2/BaseTools -j"$(nproc)"
 
       - name: Build del driver
         run: |
-          set -euo pipefail
+          set -euxo pipefail
+          exec > >(tee -a ci.log) 2>&1
           export WORKSPACE="$PWD"
           export EDK_TOOLS_PATH="$PWD/edk2/BaseTools"
           export PACKAGES_PATH="$PWD/edk2:$PWD"
           . edk2/edksetup.sh BaseTools
-          build -p IntVMD.dsc -a X64 -t GCC5 -b RELEASE 2>&1 | tee build-uefi.log
+          build -p IntVMD.dsc -a X64 -t GCC5 -b RELEASE
 
-      - name: Resumir errores de compilacion
+      - name: Verificar artefacto
+        run: |
+          set -euxo pipefail
+          exec > >(tee -a ci.log) 2>&1
+          find Build/IntVMD -name 'IntelVMDUefi.efi' -print -exec file {} \;
+
+      - name: Resumen (cola del log)
         if: always()
         run: |
           {
-            echo "### Errores de compilacion (EDK2)"
+            echo "### Cola del log (ultimas 40 lineas)"
             echo '```'
-            grep -E "(error|Error|fatal)" build-uefi.log | head -30 || true
+            tail -40 ci.log 2>/dev/null || echo "(sin ci.log)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          grep -E "(error|Error|fatal)" build-uefi.log | head -8 | while IFS= read -r line; do
-            echo "::error title=edk2::$(echo "$line" | tr -d '\r' | cut -c1-200)"
+          tail -30 ci.log 2>/dev/null | while IFS= read -r line; do
+            echo "::error title=uefi::$(echo "$line" | tr -d '\r' | cut -c1-220)"
           done
           exit 0
-
-      - name: Verificar artefacto
-        if: always()
-        run: |
-          set -euo pipefail
-          find Build/IntVMD -name 'IntelVMDUefi.efi' -print -exec file {} \;
 
       - name: Upload driver
         if: always()
