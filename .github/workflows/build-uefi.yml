@@ -3,9 +3,9 @@ name: build-uefi
 # Compila el driver UEFI de VMD (IntelVMDUefi) con EDK2 y verifica que el
 # paquete EDK2 (DSC/INF/dec + VMDCore) construye en X64. No toca hardware.
 #
-# Nota de diagnostico: los logs de job requieren token (403). Por eso TODO se
-# vuelca a ci.log y el ultimo paso publica la cola del log como anotaciones del
-# check-run, que si son legibles sin autenticar.
+# Diagnostico sin token: los logs de job dan 403, asi que cada paso vuelca con
+# "| tee -a ci.log" y el ultimo paso publica la cola como anotaciones del
+# check-run (legibles sin autenticar).
 on:
   push:
     branches: [main]
@@ -20,52 +20,64 @@ jobs:
 
       - name: Dependencias
         run: |
-          set -euo pipefail
-          exec > >(tee -a ci.log) 2>&1
-          sudo apt-get update
-          sudo apt-get install -y build-essential uuid-dev iasl nasm python3 python3-pip
+          set -eo pipefail
+          {
+            echo "=== dependencias ==="
+            sudo apt-get update
+            sudo apt-get install -y build-essential uuid-dev iasl nasm python3 python3-pip
+          } 2>&1 | tee -a ci.log
 
       - name: Clonar EDK2
         run: |
-          set -euxo pipefail
-          exec > >(tee -a ci.log) 2>&1
-          git clone --depth 1 --branch edk2-stable202411 \
-            https://github.com/tianocore/edk2.git edk2
-          git -C edk2 submodule update --init --depth 1
+          set -eo pipefail
+          {
+            echo "=== clone edk2 ==="
+            git clone --depth 1 --branch edk2-stable202411 \
+              https://github.com/tianocore/edk2.git edk2
+            git -C edk2 submodule update --init --depth 1
+          } 2>&1 | tee -a ci.log
 
       - name: BaseTools
         run: |
-          set -euxo pipefail
-          exec > >(tee -a ci.log) 2>&1
-          pip3 install --upgrade -r edk2/pip-requirements.txt
-          make -C edk2/BaseTools -j"$(nproc)"
+          set -eo pipefail
+          {
+            echo "=== basetools ==="
+            pip3 install --upgrade -r edk2/pip-requirements.txt
+            make -C edk2/BaseTools -j"$(nproc)"
+          } 2>&1 | tee -a ci.log
 
+      # Sin "set -u": edksetup.sh no es seguro ante variables no definidas y
+      # aborta en silencio. Todo va en un solo paso para no perder la salida.
       - name: Build del driver
         run: |
-          set -euxo pipefail
-          exec > >(tee -a ci.log) 2>&1
-          export WORKSPACE="$PWD"
-          export EDK_TOOLS_PATH="$PWD/edk2/BaseTools"
-          export PACKAGES_PATH="$PWD/edk2:$PWD"
-          . edk2/edksetup.sh BaseTools
-          build -p IntVMD.dsc -a X64 -t GCC5 -b RELEASE
+          set -eo pipefail
+          {
+            echo "=== build driver ==="
+            export WORKSPACE="$PWD"
+            export EDK_TOOLS_PATH="$PWD/edk2/BaseTools"
+            export PACKAGES_PATH="$PWD/edk2:$PWD"
+            source edk2/edksetup.sh BaseTools
+            build -p IntVMD.dsc -a X64 -t GCC5 -b RELEASE
+          } 2>&1 | tee -a ci.log
 
       - name: Verificar artefacto
         run: |
-          set -euxo pipefail
-          exec > >(tee -a ci.log) 2>&1
-          find Build/IntVMD -name 'IntelVMDUefi.efi' -print -exec file {} \;
+          set -eo pipefail
+          {
+            echo "=== artefacto ==="
+            find Build/IntVMD -name 'IntelVMDUefi.efi' -print -exec file {} \;
+          } 2>&1 | tee -a ci.log
 
       - name: Resumen (cola del log)
         if: always()
         run: |
           {
-            echo "### Cola del log (ultimas 40 lineas)"
+            echo "### Cola del log (ultimas 60 lineas)"
             echo '```'
-            tail -40 ci.log 2>/dev/null || echo "(sin ci.log)"
+            tail -60 ci.log 2>/dev/null || echo "(sin ci.log)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          tail -30 ci.log 2>/dev/null | while IFS= read -r line; do
+          tail -40 ci.log 2>/dev/null | while IFS= read -r line; do
             echo "::error title=uefi::$(echo "$line" | tr -d '\r' | cut -c1-220)"
           done
           exit 0
