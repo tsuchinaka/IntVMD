@@ -16,6 +16,13 @@
   Salida: por Print() (consola de OpenCore) y DEBUG().
 **/
 
+// Los headers de EDK2 son C puro: NO llevan `extern "C"` (comprobado en
+// MdePkg/Include/Library/UefiLib.h). Si se incluyen tal cual desde un .cpp, en
+// C++ se declaran con enlazado C++ y el linker busca el nombre manglado
+// (`Print(unsigned short const*, ...)`), mientras que MdePkg exporta el
+// simbolo C `Print` -> "undefined reference". Envolviendolos en extern "C" el
+// enlazado vuelve a ser C y los simbolos casan.
+extern "C" {
 #include <Uefi.h>
 
 #include <Library/BaseLib.h>
@@ -29,6 +36,7 @@
 #include <IndustryStandard/Pci.h>
 #include <Protocol/DriverBinding.h>
 #include <Protocol/PciIo.h>
+}
 
 #include "VMDLogic.hpp"
 
