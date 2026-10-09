@@ -28,7 +28,7 @@
   UefiDriverEntryPoint|MdePkg/Library/UefiDriverEntryPoint/UefiDriverEntryPoint.inf
   UefiLib|MdePkg/Library/UefiLib/UefiLib.inf
   DevicePathLib|MdePkg/Library/UefiDevicePathLib/UefiDevicePathLib.inf
-  VMDCore|VMDCore/VMDCore.inf
+  VMDCore|IntVMD/VMDCore/VMDCore.inf
 
 [Components]
   IntelVMDUefi/IntelVMDUefi.inf
