@@ -9,18 +9,24 @@ CXXFLAGS = -x c++ -std=c++11 -target $(TARGET) -mkernel \
 	-fno-exceptions -fno-rtti -fno-builtin \
 	-DKERNEL -DKERNEL_PRIVATE -DDRIVER_PRIVATE -DAPPLE -DNeXT \
 	-Wno-inconsistent-missing-override -Wno-deprecated-declarations \
-	-I$(KERN_INCL)
+	-I$(KERN_INCL) -IIntelVMD
 LDFLAGS = -target $(TARGET) -mkernel -nostdlib -static -Wl,-kext \
 	-L$(SDK)/usr/lib -lkmodc++ -lkmod
+
+SRCS = IntelVMD/IntelVMD.cpp IntelVMD/Logic/VMDLogic.cpp
+OBJS = IntelVMD.o Logic/VMDLogic.o
 
 check:
 	$(CXX) -fsyntax-only $(CXXFLAGS) IntelVMD/IntelVMD.cpp && echo "SINTAXIS OK"
 
-IntelVMD.o: IntelVMD/IntelVMD.cpp IntelVMD/IntelVMD.h
+IntelVMD.o: IntelVMD/IntelVMD.cpp IntelVMD/IntelVMD.h IntelVMD/Logic/VMDLogic.hpp
 	$(CXX) $(CXXFLAGS) -c IntelVMD/IntelVMD.cpp -o IntelVMD.o
 
-IntelVMD.bin: IntelVMD.o
-	$(CXX) $(LDFLAGS) -o IntelVMD.bin IntelVMD.o
+Logic/VMDLogic.o: IntelVMD/Logic/VMDLogic.cpp IntelVMD/Logic/VMDLogic.hpp
+	$(CXX) $(CXXFLAGS) -c IntelVMD/Logic/VMDLogic.cpp -o Logic/VMDLogic.o
+
+IntelVMD.bin: $(OBJS)
+	$(CXX) $(LDFLAGS) -o IntelVMD.bin $(OBJS)
 
 all: IntelVMD.bin
 	rm -rf IntelVMD.kext
