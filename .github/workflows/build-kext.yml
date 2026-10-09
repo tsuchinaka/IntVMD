@@ -8,8 +8,11 @@ on:
 
 jobs:
   build:
-    # macos-13 es el ultimo runner con Intel: el kext se compila para x86_64.
-    runs-on: macos-13
+    # macos-13 quedo EOL (deprecacion 2025-09-22, sin soporte desde 2025-12-08).
+    # Un job que pide un label retirado no falla: queda encolado para siempre
+    # esperando una maquina que nunca llega. Por eso los runs se veian "Queued".
+    # macos-15-intel es el ultimo runner hospedado con CPU Intel (x86_64).
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
 
@@ -20,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           ROOT="$(xcode-select -p)/Platforms/MacOSX.platform/Developer/SDKs"
-          for cand in MacOSX14.4.sdk MacOSX14.5.sdk MacOSX14.sdk MacOSX13.3.sdk MacOSX13.sdk; do
+          for cand in MacOSX15.sdk MacOSX14.5.sdk MacOSX14.4.sdk MacOSX14.sdk MacOSX13.3.sdk MacOSX13.sdk; do
             if [ -d "$ROOT/$cand" ]; then
               echo "SDK=$ROOT/$cand" >> "$GITHUB_ENV"
               echo "Usando SDK: $cand"
