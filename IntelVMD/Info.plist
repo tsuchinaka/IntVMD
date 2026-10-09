@@ -34,21 +34,6 @@
 			<key>IOPCIPrimaryMatch</key>
 			<string>0x201D8086 0x28C08086 0x28C18086 0x467F8086 0x4C3D8086 0xA77F8086 0x7D0B8086 0xAD0B8086 0x9A0B8086 0xB60B8086 0xB06F8086 0xB07F8086 0xD70B8086 0xD73B8086</string>
 		</dict>
-		<!-- Nub hijo: se publica en runtime (attach) sobre cada dispositivo
-		     encontrado en la ECAM del VMD. Se declara para que IOPCIFamily
-		     conozca la clase; NO se hace matching por config space porque su
-		     cabecera se lee a traves de la ventana ECAM. -->
-		<key>VMDPciDevice</key>
-		<dict>
-			<key>CFBundleIdentifier</key>
-			<string>com.vmdmacos.IntelVMD</string>
-			<key>IOClass</key>
-			<string>VMDPciDevice</string>
-			<key>IOProviderClass</key>
-			<string>IntelVMD</string>
-			<key>IOUserClientClass</key>
-			<string>IOUserClient</string>
-		</dict>
 	</dict>
 	<key>OSBundleCompatibleVersion</key>
 	<string>0.1.0</string>
