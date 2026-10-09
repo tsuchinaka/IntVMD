@@ -69,6 +69,14 @@ VmdTrace (
   IN CONST CHAR8  *Step
   );
 
+// Declaracion adelantada: VmdFileWrite se define tras VmdTrace, pero VmdLog
+// y VmdTrace la usan.
+STATIC
+VOID
+VmdFileWrite (
+  IN CONST CHAR8  *Ascii
+  );
+
 /** Escribe una linea a la consola del firmware (ConOut directo).
 OJO ABI (verificado): en X64 EDK2 define VA_LIST como __builtin_ms_va_list y
 Base.h EXIGE que toda funcion que llame a VA_START() sea EFIAPI
@@ -104,13 +112,6 @@ VmdLog (
   VmdFileWrite (Ascii);
   VmdTrace ("VL-log-done");
 }
-
-// Declaracion adelantada: VmdFileWrite/VmdLogOpen se definen tras VmdTrace.
-STATIC
-VOID
-VmdFileWrite (
-  IN CONST CHAR8  *Ascii
-  );
 
 /**
   Traza de biseccion: escribe SIEMPRE a la consola del firmware (ConOut
