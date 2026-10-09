@@ -4,9 +4,10 @@ Exposes NVMe drives hidden behind Intel Volume Management Device
 controllers (8086:09AB/28Cx/467F/7D0B/AD0B/9A0B/…) to macOS, so Apple's
 `IONVMeFamily` can attach to them. Hackintosh / OpenCore use.
 
-Status: **Phase 1** — matches the VMD PCI device, maps CFGBAR (BAR0),
+Estado: **Phase 1** — matches the VMD PCI device, maps CFGBAR (BAR0),
 dumps VMCAP/VMCONFIG/VMLOCK and computes the child bus start. Child-bus
-enumeration (Phase 2) and MSI-X demux (Phase 3) are pending. See `PLAN.md`.
+enumeration (Phase 2) and MSI-X demux (Phase 3) are pending. See `PLAN.md`
+and `HANDOFF.md` for the current state and the exact next step.
 
 Reference: Linux `drivers/pci/controller/vmd.c` (GPL) — the VMD is a PCI
 aperture (ECAM window + memory windows + MSI remapping), not a storage
