@@ -8,24 +8,9 @@
 //  "'IOKit/IOMemoryMap.h' file not found".)
 #include <IOKit/IOMemoryDescriptor.h>
 
-class IOPCIDevice;
+#include "VMDLogic.hpp"   // nucleo compartido (tambien lo usa el driver UEFI)
 
-// Estructura de un dispositivo encontrado en la ECAM del VMD. Solo datos:
-// la logica pura vive en IntelVMD/Logic/VMDLogic.* y esta testeada en el host.
-struct VMDFoundDevice {
-    uint8_t bus;        // numero de bus real (no el relativo a ECAM)
-    uint8_t devFn;      // (dev << 3) | fn
-    uint16_t vendorId;
-    uint16_t deviceId;
-    uint8_t revision;
-    uint8_t headerType;
-    uint32_t classCode;
-    bool multiFunction;
-    uint8_t classCodeSub;
-    uint8_t classCodeBase;
-    uint8_t interruptLine;
-    uint8_t interruptPin;
-};
+class IOPCIDevice;
 
 class IntelVMD : public IOService {
     OSDeclareDefaultStructors(IntelVMD);

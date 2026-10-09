@@ -1,0 +1,39 @@
+## @file
+# Driver UEFI (DXE) de Intel VMD. OpenCore lo carga desde UEFI.Drivers.
+#
+# Fase 1 (este commit): bindea el controlador VMD, mapea la CFGBAR, decodifica
+# VMCAP/VMCONFIG/VMLOCK y recorre la ECAM registrando los dispositivos del bus
+# oculto. Es el equivalente UEFI de la Fase 2a del kext.
+#
+# Fase 2 (siguiente): publicar EFI_PCI_ROOT_BRIDGE_IO_PROTOCOL +
+# EFI_PCI_HOST_BRIDGE_RESOURCE_ALLOCATION para que PciBusDxe enumere y
+# NvmExpressDxe exponga el NVMe como dispositivo de bloque.
+##
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = IntelVMDUefi
+  FILE_GUID      = 2a3b4c5d-6e7f-4809-9d1e-3f4a5b6c7d81
+  MODULE_TYPE    = UEFI_DRIVER
+  VERSION_STRING = 0.1
+  ENTRY_POINT    = IntelVMDUefiEntryPoint
+
+[Sources]
+  IntelVMDUefi.cpp
+
+[Packages]
+  MdePkg/MdePkg.dec
+  IntVMD/IntVMD.dec
+
+[LibraryClasses]
+  UefiDriverEntryPoint
+  DebugLib
+  BaseLib
+  BaseMemoryLib
+  MemoryAllocationLib
+  UefiBootServicesTableLib
+  UefiLib
+  VMDCore
+
+[Protocols]
+  gEfiDriverBindingProtocolGuid
+  gEfiPciIoProtocolGuid

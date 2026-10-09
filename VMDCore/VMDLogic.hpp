@@ -17,6 +17,24 @@ struct VMDRegs {
     bool msi_remap_enabled = false;
 };
 
+// Dispositivo encontrado en la ECAM del dominio VMD. POD, sin inicializadores
+// por defecto, para que lo puedan usar tanto el kext (IOKit) como el driver
+// UEFI (EDK2) sin duplicar la definicion.
+struct VMDFoundDevice {
+    uint8_t bus;        // numero de bus real (no el relativo a la ECAM)
+    uint8_t devFn;      // (dev << 3) | fn
+    uint16_t vendorId;
+    uint16_t deviceId;
+    uint8_t revision;
+    uint8_t headerType;
+    uint32_t classCode;
+    bool multiFunction;
+    uint8_t classCodeSub;
+    uint8_t classCodeBase;
+    uint8_t interruptLine;
+    uint8_t interruptPin;
+};
+
 // busn_start segun VMCAP/VMCONFIG. 0xFF = configuracion invalida.
 // Si BUS_RESTRICT_CAP es 0, Linux deduce el bus inicial de BAR4 (Base ID),
 // no de VMCONFIG: por eso aqui se devuelve 0 y el kext debe usar BAR4.

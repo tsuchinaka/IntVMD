@@ -1,6 +1,6 @@
 #include "IntelVMD.h"
 
-#include "Logic/VMDLogic.hpp"
+#include "VMDLogic.hpp"
 
 #include <IOKit/IOLib.h>
 #include <IOKit/pci/IOPCIDevice.h>

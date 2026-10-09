@@ -1,0 +1,26 @@
+## @file
+# Declaracion del paquete IntVMD para EDK2 (driver UEFI del dominio VMD).
+#
+# El paquete agrupa:
+#   - VMDCore/        : nucleo VMD (misma fuente que usa el kext de macOS)
+#   - IntelVMDUefi/   : driver DXE que expone el NVMe tras Intel VMD a OpenCore
+#
+##
+[Defines]
+  DEC_SPECIFICATION = 0x00010005
+  PACKAGE_NAME      = IntVMD
+  PACKAGE_GUID      = 7a2b9c4d-3e5f-4a6b-8c1d-2e3f4a5b6c7d
+  PACKAGE_VERSION   = 0.1
+
+[Includes]
+  VMDCore
+
+[LibraryClasses]
+  ##  @libraryclass  Logica VMD pura (ECAM, VMCAP/VMCONFIG, MSI remap).
+  VMDCore|VMDCore/VMDCore.inf
+
+[Guids]
+
+[Ppis]
+
+[Protocols]

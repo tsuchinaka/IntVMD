@@ -1,6 +1,10 @@
 # Build del kext sin Xcode completo (solo Command Line Tools).
 # - check: verificacion de sintaxis contra Kernel.framework
 # - all: compila + linka + empaqueta IntelVMD.kext + firma ad-hoc
+#
+# El nucleo VMD (matematica ECAM, decodificacion VMCAP/VMCONFIG, reglas de
+# MSI-remap) vive en VMDCore/ y es la MISMA fuente que usa el driver UEFI
+# (IntelVMDUefi/). No duplicar logica: si cambia el nucleo, cambia en un sitio.
 SDK ?= /Library/Developer/CommandLineTools/SDKs/MacOSX13.sdk
 TARGET = x86_64-apple-macosx
 CXX = clang++
@@ -10,24 +14,24 @@ CXXFLAGS = -x c++ -std=c++11 -target $(TARGET) -mkernel \
 	-fno-exceptions -fno-rtti -fno-builtin \
 	-DKERNEL -DKERNEL_PRIVATE -DDRIVER_PRIVATE -DAPPLE -DNeXT \
 	-Wno-inconsistent-missing-override -Wno-deprecated-declarations \
-	-I$(KERN_INCL) -IIntelVMD
+	-I$(KERN_INCL) -IIntelVMD -IVMDCore
 LDFLAGS = -target $(TARGET) -mkernel -nostdlib -static -Wl,-kext \
 	-isysroot $(SDK) \
 	-L$(SDK)/usr/lib -lkmodc++ -lkmod
 
-SRCS = IntelVMD/IntelVMD.cpp IntelVMD/Logic/VMDLogic.cpp
-# Los .o van junto a sus .cpp: el directorio Logic/ esta bajo IntelVMD/, no en
-# la raiz (por eso la salida debe ser IntelVMD/Logic/VMDLogic.o).
-OBJS = IntelVMD.o IntelVMD/Logic/VMDLogic.o
+SRCS = IntelVMD/IntelVMD.cpp VMDCore/VMDLogic.cpp
+# Los .o van junto a sus .cpp (el include de VMDLogic.hpp es relativo al
+# directorio de su .cpp, por eso VMDCore/VMDLogic.o vive en VMDCore/).
+OBJS = IntelVMD.o VMDCore/VMDLogic.o
 
 check:
 	$(CXX) -fsyntax-only $(CXXFLAGS) IntelVMD/IntelVMD.cpp && echo "SINTAXIS OK"
 
-IntelVMD.o: IntelVMD/IntelVMD.cpp IntelVMD/IntelVMD.h IntelVMD/Logic/VMDLogic.hpp
+IntelVMD.o: IntelVMD/IntelVMD.cpp IntelVMD/IntelVMD.h VMDCore/VMDLogic.hpp
 	$(CXX) $(CXXFLAGS) -c IntelVMD/IntelVMD.cpp -o IntelVMD.o
 
-IntelVMD/Logic/VMDLogic.o: IntelVMD/Logic/VMDLogic.cpp IntelVMD/Logic/VMDLogic.hpp
-	$(CXX) $(CXXFLAGS) -c IntelVMD/Logic/VMDLogic.cpp -o IntelVMD/Logic/VMDLogic.o
+VMDCore/VMDLogic.o: VMDCore/VMDLogic.cpp VMDCore/VMDLogic.hpp
+	$(CXX) $(CXXFLAGS) -c VMDCore/VMDLogic.cpp -o VMDCore/VMDLogic.o
 
 IntelVMD.bin: $(OBJS)
 	$(CXX) $(LDFLAGS) -o IntelVMD.bin $(OBJS)
@@ -41,6 +45,6 @@ all: IntelVMD.bin
 	@echo "KEXT LISTO: IntelVMD.kext"
 
 clean:
-	rm -rf IntelVMD.o IntelVMD/Logic/VMDLogic.o IntelVMD.bin IntelVMD.kext build.log
+	rm -rf IntelVMD.o VMDCore/VMDLogic.o IntelVMD.bin IntelVMD.kext build.log
 
 .PHONY: check all clean

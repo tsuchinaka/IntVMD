@@ -1,0 +1,20 @@
+## @file
+# Libreria EDK2 del nucleo VMD. Es la MISMA fuente (VMDLogic.cpp/.hpp) que
+# compila el kext de macOS, para no duplicar la logica del dominio VMD.
+##
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = VMDCore
+  FILE_GUID      = 1f2e3d4c-5b6a-4798-8c1d-2e3f4a5b6c70
+  MODULE_TYPE    = BASE
+  VERSION_STRING = 1.0
+  LIBRARY_CLASS  = VMDCore
+
+[Sources]
+  VMDLogic.cpp
+
+[Packages]
+  MdePkg/MdePkg.dec
+  IntVMD/IntVMD.dec
+
+[LibraryClasses]
