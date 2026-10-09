@@ -611,14 +611,33 @@ IntelVMDUefiSupported (
       Status = EFI_SUCCESS;
     }
   }
-  // Traza SIEMPRE la evaluacion: si el cuelgue de OC esta en nuestro
-  // Supported/Start, el fichero muestra el ultimo handle evaluado.
-  VmdLog (
-    "IntelVMD-UEFI: supported %04x:%04x -> %r\n",
-    Pci.Hdr.VendorId,
-    Pci.Hdr.DeviceId,
-    Status
-    );
+  // Traza SIEMPRE la evaluacion con su device-path: si el cuelgue de OC esta
+  // en nuestro Supported/Start, el fichero muestra el ultimo handle evaluado.
+  {
+    EFI_DEVICE_PATH_PROTOCOL  *Dp;
+    CHAR8                     *DpText;
+
+    Dp     = NULL;
+    DpText = NULL;
+    if (!EFI_ERROR (
+          gBS->HandleProtocol (
+                 ControllerHandle,
+                 &gEfiDevicePathProtocolGuid,
+                 (VOID **)&Dp
+                 ))) {
+      DpText = VmdDevicePathToAscii (Dp);
+    }
+    VmdLog (
+      "IntelVMD-UEFI: supported %04x:%04x -> %r [%a]\n",
+      Pci.Hdr.VendorId,
+      Pci.Hdr.DeviceId,
+      Status,
+      (DpText != NULL) ? DpText : "?"
+      );
+    if (DpText != NULL) {
+      FreePool (DpText);
+    }
+  }
 
   gBS->CloseProtocol (
          ControllerHandle,
