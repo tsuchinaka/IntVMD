@@ -164,40 +164,39 @@ VmdFileWrite (
 
 STATIC
 VOID
-VmdLogOpen (
-  IN EFI_HANDLE  ImageHandle
+VmdLogCreateOnVolume (
+  IN EFI_SIMPLE_FILE_SYSTEM_PROTOCOL  *Fs,
+  IN UINTN                             VolIndex
   )
 {
-  EFI_STATUS                 Status;
-  EFI_LOADED_IMAGE_PROTOCOL  *LoadedImage;
-  EFI_SIMPLE_FILE_SYSTEM_PROTOCOL  *Fs;
-  EFI_FILE_PROTOCOL          *Root;
-  EFI_FILE_PROTOCOL          *Old;
+  EFI_STATUS         Status;
+  EFI_FILE_PROTOCOL  *Root;
+  EFI_FILE_PROTOCOL  *Old;
+  EFI_FILE_PROTOCOL  *Marker;
 
-  LoadedImage = NULL;
-  Status = gBS->OpenProtocol (
-                  ImageHandle,
-                  &gEfiLoadedImageProtocolGuid,
-                  (VOID **)&LoadedImage,
-                  ImageHandle,
-                  NULL,
-                  EFI_OPEN_PROTOCOL_GET_PROTOCOL
-                  );
-  if (EFI_ERROR (Status) || (LoadedImage == NULL)) {
-    return;
-  }
-  Status = gBS->HandleProtocol (
-                  LoadedImage->DeviceHandle,
-                  &gEfiSimpleFileSystemProtocolGuid,
-                  (VOID **)&Fs
-                  );
-  if (EFI_ERROR (Status) || (Fs == NULL)) {
+  if (Fs == NULL) {
     return;
   }
   Status = Fs->OpenVolume (Fs, &Root);
+  VmdTrace ("LO-vol");
   if (EFI_ERROR (Status) || (Root == NULL)) {
     return;
   }
+  // Solo vale el volumen que tiene \EFI\OC: asi el log cae seguro en el USB
+  // de OpenCore y no en la ESP interna de Windows.
+  Status = Root->Open (
+                    Root,
+                    &Marker,
+                    (CHAR16 *)L"\\EFI\\OC\\OpenCore.efi",
+                    EFI_FILE_MODE_READ,
+                    0
+                    );
+  VmdTrace ("LO-marker");
+  if (EFI_ERROR (Status) || (Marker == NULL)) {
+    return;
+  }
+  Marker->Close (Marker);
+  VmdTrace ("LO-usb-found");
   // Borrar el log del arranque anterior para un fichero limpio por boot.
   Status = Root->Open (
                     Root,
@@ -217,11 +216,87 @@ VmdLogOpen (
                     EFI_FILE_MODE_WRITE,
                     0
                     );
+  VmdTrace ("LO-created");
   if (EFI_ERROR (Status)) {
     mLogFile = NULL;
   }
   // Root se deja abierto a proposito: el fichero debe sobrevivir a un
   // cuelgue posterior y su contenido ya esta vaciado con Flush por linea.
+  (VOID)VolIndex;
+}
+
+STATIC
+VOID
+VmdLogOpen (
+  IN EFI_HANDLE  ImageHandle
+  )
+{
+  EFI_STATUS                 Status;
+  EFI_LOADED_IMAGE_PROTOCOL  *LoadedImage;
+  EFI_SIMPLE_FILE_SYSTEM_PROTOCOL  *Fs;
+  EFI_HANDLE                   *FsHandles;
+  UINTN                        FsCount;
+  UINTN                        Index;
+
+  // Via 1: el volumen del que se cargo nuestra imagen. OpenCore carga con
+  // LoadImage(FilePath=NULL, buffer en memoria), asi que este DeviceHandle no
+  // es fiable: si falla se pasa a la via 2 (barrido de todos los volumenes).
+  LoadedImage = NULL;
+  Status = gBS->OpenProtocol (
+                  ImageHandle,
+                  &gEfiLoadedImageProtocolGuid,
+                  (VOID **)&LoadedImage,
+                  ImageHandle,
+                  NULL,
+                  EFI_OPEN_PROTOCOL_GET_PROTOCOL
+                  );
+  VmdTrace ("LO-img");
+  if (!EFI_ERROR (Status) && (LoadedImage != NULL) &&
+      (LoadedImage->DeviceHandle != NULL)) {
+    Status = gBS->HandleProtocol (
+                    LoadedImage->DeviceHandle,
+                    &gEfiSimpleFileSystemProtocolGuid,
+                    (VOID **)&Fs
+                    );
+    VmdTrace ("LO-fs");
+    if (!EFI_ERROR (Status) && (Fs != NULL)) {
+      VmdLogCreateOnVolume (Fs, 0);
+      if (mLogFile != NULL) {
+        VmdTrace ("LO-via1-ok");
+        return;
+      }
+    }
+  }
+  // Via 2: barrer todos los volumenes y quedarse con el que tiene \EFI\OC.
+  FsHandles = NULL;
+  FsCount   = 0;
+  Status = gBS->LocateHandleBuffer (
+                  ByProtocol,
+                  &gEfiSimpleFileSystemProtocolGuid,
+                  NULL,
+                  &FsCount,
+                  &FsHandles
+                  );
+  VmdTrace ("LO-sweep");
+  if (EFI_ERROR (Status) || (FsHandles == NULL)) {
+    return;
+  }
+  for (Index = 0; Index < FsCount; ++Index) {
+    Status = gBS->HandleProtocol (
+                    FsHandles[Index],
+                    &gEfiSimpleFileSystemProtocolGuid,
+                    (VOID **)&Fs
+                    );
+    if (EFI_ERROR (Status) || (Fs == NULL)) {
+      continue;
+    }
+    VmdLogCreateOnVolume (Fs, Index + 1);
+    if (mLogFile != NULL) {
+      VmdTrace ("LO-via2-ok");
+      break;
+    }
+  }
+  gBS->FreePool (FsHandles);
 }
 
 // ---------------------------------------------------------------------------
