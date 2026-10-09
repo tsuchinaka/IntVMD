@@ -89,6 +89,13 @@ STATIC EFI_GUID    mVmdLogGuid = VMD_OC_LOG_GUID;
 STATIC VMD_OC_LOG  *mVmdLog    = NULL;
 STATIC BOOLEAN     mDiag       = FALSE;
 
+// Declaracion adelantada: VmdTrace se define mas abajo, pero VmdLog la usa.
+STATIC
+VOID
+VmdTrace (
+  IN CONST CHAR8  *Step
+  );
+
 STATIC
 VOID
 VmdLogInit (
