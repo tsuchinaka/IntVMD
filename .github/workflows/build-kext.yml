@@ -34,11 +34,30 @@ jobs:
           exit 1
 
       - name: Build
-        # tee deja el log del compilador en la salida del job: sin esto, si
-        # falla, el error solo existe en el log privado del runner.
-        run: make all 2>&1 | tee build.log
+        # pipefail es imprescindible: sin el, "make ... | tee" devuelve el
+        # estado de tee (0) y un fallo de compilacion pasa por bueno.
+        run: |
+          set -o pipefail
+          make all 2>&1 | tee build.log
         env:
           SDK: ${{ env.SDK }}
+
+      # Los logs del job requieren permisos de admin para descargarlos por API,
+        # asi que los errores se convierten en anotaciones del check-run, que si
+        # son legibles sin autenticar.
+      - name: Resumir errores de compilacion
+        if: always()
+        run: |
+          {
+            echo "### Errores de compilacion"
+            echo '```'
+            grep -E "(error|fatal error):" build.log | head -25 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -E "(error|fatal error):" build.log | head -8 | while IFS= read -r line; do
+            echo "::error title=compilacion::$(echo "$line" | tr -d '\r' | cut -c1-200)"
+          done
+          exit 0
 
       - name: Subir log de compilacion
         if: always()
