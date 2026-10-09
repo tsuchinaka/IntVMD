@@ -6,10 +6,13 @@
   ECAM del bus oculto.
 
   TRAZAS: la salida de consola de un driver NO se guarda en el fichero de log
-  de OpenCore (OcConsoleLib solo reenvia al ConOut original). Por eso aqui se
-  escribe con el protocolo OcLog (DBB6008F-89E4-4272-9881-CE3AFD9724D0), que es
-  el mismo canal que usa OpenCore para su log: las lineas acaban en el fichero
-  opencore-*.txt de la ESP. Si el protocolo no existe, se cae a la consola.
+  de OpenCore (OcConsoleLib solo reenvia al ConOut original), asi que aqui se
+  escribe DIRECTO a gST->ConOut (visible en pantalla/foto).
+  NO usar el protocolo OcLog de OpenCore: probado en hardware que llamar a
+  OcLog->AddEntry desde el StartImage de un driver cargado por OpenCore
+  CONGELA la maquina (puntero y revision del protocolo verificados correctos:
+  VL-oclog=ptr rev=1000B, VL-calling-AddEntry = ultima marca). Causa raiz no
+  determinada; no se necesita para el objetivo (la consola basta).
 
   MODO DIAGNOSTICO (UEFI.Drivers[i].Arguments = "diag"): recorre TODOS los
   handles con device-path y llama a ConnectController uno a uno, registrando en
@@ -51,43 +54,7 @@ extern "C" {
 
 #define INTEL_VMD_VENDOR_ID  0x8086
 
-// ---------------------------------------------------------------------------
-// Canal de trazas: protocolo OcLog de OpenCore.
-// Copia local de Include/Acidanthera/Protocol/OcLog.h para no depender de
-// OpenCorePkg en el INF (mismo layout, X64).
-// ---------------------------------------------------------------------------
-#define VMD_OC_LOG_GUID                                    \
-  {                                                        \
-    0xDBB6008F, 0x89E4, 0x4272, {                          \
-      0x98, 0x81, 0xCE, 0x3A, 0xFD, 0x97, 0x24, 0xD0       \
-    }                                                      \
-  }
-
-#define VMD_OC_LOG_REVISION  0x01000B
-
-typedef EFI_STATUS(EFIAPI *VMD_LOG_ADD_ENTRY)(
-  VOID *, UINTN, CONST CHAR8 *, VA_LIST
-  );
-
-typedef struct {
-  UINT32                Revision;
-  UINTN                 Reserved;
-  VMD_LOG_ADD_ENTRY     AddEntry;
-  VOID                  *GetLog;
-  VOID                  *SaveLog;
-  VOID                  *ResetTimers;
-  UINT32                Options;
-  UINT32                DisplayDelay;
-  UINTN                 DisplayLevel;
-  UINTN                 HaltLevel;
-  VOID                  *FileSystem;
-  VOID                  *FilePath;
-  VOID                  *UnsafeLogFile;
-} VMD_OC_LOG;
-
-STATIC EFI_GUID    mVmdLogGuid = VMD_OC_LOG_GUID;
-STATIC VMD_OC_LOG  *mVmdLog    = NULL;
-STATIC BOOLEAN     mDiag       = FALSE;
+STATIC BOOLEAN  mDiag = FALSE;
 
 // Declaracion adelantada: VmdTrace se define mas abajo, pero VmdLog la usa.
 STATIC
@@ -96,27 +63,7 @@ VmdTrace (
   IN CONST CHAR8  *Step
   );
 
-STATIC
-VOID
-VmdLogInit (
-  VOID
-  )
-{
-  EFI_STATUS  Status;
-
-  Status = gBS->LocateProtocol (&mVmdLogGuid, NULL, (VOID **)&mVmdLog);
-  if (!EFI_ERROR (Status) && (mVmdLog != NULL)) {
-    if (mVmdLog->Revision != VMD_OC_LOG_REVISION) {
-      mVmdLog = NULL;
-    }
-
-    return;
-  }
-
-  mVmdLog = NULL;
-}
-
-/** Escribe una linea: al log de OpenCore si esta, si no a la consola. */
+/** Escribe una linea a la consola del firmware (ConOut directo). */
 STATIC
 VOID
 VmdLog (
@@ -130,41 +77,13 @@ VmdLog (
 
   VA_START (Marker, Format);
 
-  VmdTrace ("VL-enter");
-  if (mVmdLog != NULL) {
-    CHAR8   Info[128];
-    CHAR16  WInfo[128];
-
-    // Valor del puntero y revision: si es basura, esta lectura ya informa
-    // (un puntero invalido aqui explicaria un cuelgue/fallo en AddEntry).
-    AsciiSPrint (
-      Info,
-      sizeof (Info),
-      "IntelVMD-UEFI: [trace] VL-oclog=%p rev=%x\r\n",
-      (VOID *)mVmdLog,
-      mVmdLog->Revision
-      );
-    AsciiStrToUnicodeStrS (Info, WInfo, ARRAY_SIZE (WInfo));
-    if ((gST != NULL) && (gST->ConOut != NULL)) {
-      gST->ConOut->OutputString (gST->ConOut, WInfo);
-    }
-
-    VmdTrace ("VL-calling-AddEntry");
-    mVmdLog->AddEntry (mVmdLog, DEBUG_INFO, Format, Marker);
-    VmdTrace ("VL-afterAdd");
-  } else {
-    VmdTrace ("VL-null-fallback");
-    AsciiVSPrint (Ascii, sizeof (Ascii), Format, Marker);
-    VmdTrace ("VL-afterVSPrint");
-    AsciiStrToUnicodeStrS (Ascii, Wide, ARRAY_SIZE (Wide));
-    if (gST->ConOut != NULL) {
-      gST->ConOut->OutputString (gST->ConOut, Wide);
-    }
-
-    VmdTrace ("VL-afterConOut");
-  }
-
+  AsciiVSPrint (Ascii, sizeof (Ascii), Format, Marker);
   VA_END (Marker);
+
+  AsciiStrToUnicodeStrS (Ascii, Wide, ARRAY_SIZE (Wide));
+  if ((gST != NULL) && (gST->ConOut != NULL)) {
+    gST->ConOut->OutputString (gST->ConOut, Wide);
+  }
 }
 
 /**
@@ -389,9 +308,6 @@ EnumerateVmdBus (
 // Modo diagnostico: conectar los handles uno a uno, trazeando cada paso.
 // ---------------------------------------------------------------------------
 
-// Desactivado en esta build: el auto-connect se reactiva cuando el entry
-// llegue hasta aqui. Se conserva para la siguiente iteracion.
-__attribute__((unused))
 STATIC
 VOID
 VmdDiagnoseConnect (
@@ -666,20 +582,24 @@ IntelVMDUefiEntryPoint (
 {
   EFI_STATUS  Status;
 
-  // Biseccion del entry point: cada paso deja marca en la consola del
-  // firmware (foto) antes de ejecutar la llamada. Si el arranque se cuelga,
-  // la ultima marca visible dice exactamente que llamada cuelga.
+  // Cada paso deja marca en la consola del firmware (foto). Si el arranque
+  // se cuelga, la ultima marca visible dice exactamente que llamada cuelga.
   VmdTrace ("0-enter");
-  VmdLogInit ();
-  VmdTrace ("1-locate-oclog");
   ReadOwnArguments (ImageHandle);
-  VmdTrace ("2-read-args");
+  VmdTrace ("1-read-args");
 
-  VmdLog ("IntelVMD-UEFI: entry point (log=%a diag=%u)\n", (mVmdLog != NULL) ? "ok" : "no", mDiag ? 1U : 0U);
-  VmdTrace ("3-first-log");
+  VmdLog ("IntelVMD-UEFI: entry point diag=%u\n", mDiag ? 1U : 0U);
+  VmdTrace ("2-entry-logged");
 
-  // NOTA: el auto-connect de diagnostico esta desactivado en esta build: solo
-  // se traza el entry. Se reactiva cuando el entry llegue hasta aqui.
+  // Modo diagnostico (Arguments="diag" en UEFI.Drivers): conecta los handles
+  // uno a uno con traza antes/despues. Si el cuelgue original esta en el
+  // connect, la ultima linea de la foto identifica el handle culpable.
+  if (mDiag) {
+    VmdTrace ("3-diag-start");
+    VmdDiagnoseConnect ();
+    VmdTrace ("3-diag-done");
+  }
+
   Status = EfiLibInstallDriverBinding (
              ImageHandle,
              SystemTable,
