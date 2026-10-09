@@ -136,6 +136,28 @@ VmdLog (
   VA_END (Marker);
 }
 
+/**
+  Traza de biseccion: escribe SIEMPRE a la consola del firmware (ConOut
+  directo), que no depende de OpenCore. Sirve para localizar un cuelgue dentro
+  del propio entry point: cada paso deja su marca en pantalla (foto) aunque el
+  log de OpenCore no avance.
+**/
+STATIC
+VOID
+VmdTrace (
+  IN CONST CHAR8  *Step
+  )
+{
+  CHAR8   Ascii[128];
+  CHAR16  Wide[128];
+
+  AsciiSPrint (Ascii, sizeof (Ascii), "IntelVMD-UEFI: [trace] %a\r\n", Step);
+  AsciiStrToUnicodeStrS (Ascii, Wide, ARRAY_SIZE (Wide));
+  if ((gST != NULL) && (gST->ConOut != NULL)) {
+    gST->ConOut->OutputString (gST->ConOut, Wide);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Driver binding
 // ---------------------------------------------------------------------------
@@ -608,19 +630,28 @@ IntelVMDUefiEntryPoint (
   IN EFI_SYSTEM_TABLE  *SystemTable
   )
 {
+  EFI_STATUS  Status;
+
+  // Biseccion del entry point: cada paso deja marca en la consola del
+  // firmware (foto) antes de ejecutar la llamada. Si el arranque se cuelga,
+  // la ultima marca visible dice exactamente que llamada cuelga.
+  VmdTrace ("0-enter");
   VmdLogInit ();
+  VmdTrace ("1-locate-oclog");
   ReadOwnArguments (ImageHandle);
+  VmdTrace ("2-read-args");
 
   VmdLog ("IntelVMD-UEFI: entry point (log=%a diag=%u)\n", (mVmdLog != NULL) ? "ok" : "no", mDiag ? 1U : 0U);
+  VmdTrace ("3-first-log");
 
-  if (mDiag) {
-    VmdDiagnoseConnect ();
-  }
-
-  return EfiLibInstallDriverBinding (
-           ImageHandle,
-           SystemTable,
-           &mIntelVMDUefiDriverBinding,
-           ImageHandle
-           );
+  // NOTA: el auto-connect de diagnostico esta desactivado en esta build: solo
+  // se traza el entry. Se reactiva cuando el entry llegue hasta aqui.
+  Status = EfiLibInstallDriverBinding (
+             ImageHandle,
+             SystemTable,
+             &mIntelVMDUefiDriverBinding,
+             ImageHandle
+             );
+  VmdTrace ("4-binding-installed");
+  return Status;
 }
