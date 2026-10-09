@@ -2,7 +2,11 @@
 #define INTEL_VMD_H
 
 #include <IOKit/IOService.h>
-#include <IOKit/IOMemoryMap.h>
+// OJO: NO existe IOKit/IOMemoryMap.h en Kernel.framework. IOMemoryMap viene
+// declarado en IOKit/IOMemoryDescriptor.h, que es el header correcto.
+// (El include equivocado hacia fallar el build entero con
+//  "'IOKit/IOMemoryMap.h' file not found".)
+#include <IOKit/IOMemoryDescriptor.h>
 
 class IOPCIDevice;
 
