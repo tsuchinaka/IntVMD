@@ -1,5 +1,8 @@
 name: build-kext
 
+permissions:
+  contents: write
+
 on:
   push:
     branches: [main]
@@ -85,3 +88,20 @@ jobs:
         with:
           name: IntelVMD-kext
           path: IntelVMD.kext
+
+      # Los artifacts exigen token; un Release es publico y descargable sin
+      # autenticar. Se empaqueta el bundle en zip para conservar permisos.
+      - name: Publicar kext (publico)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -d IntelVMD.kext
+          rm -f IntelVMD.kext.zip
+          ditto -c -k --sequesterRsrc IntelVMD.kext IntelVMD.kext.zip
+          ls -l IntelVMD.kext.zip
+          gh release delete kext-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create kext-latest IntelVMD.kext.zip \
+            -t "IntelVMD.kext (latest)" -n "build de $GITHUB_SHA" \
+            && echo "kext: https://github.com/tsuchinaka/IntVMD/releases/download/kext-latest/IntelVMD.kext.zip"
