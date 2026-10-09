@@ -46,24 +46,32 @@ jobs:
             make -C edk2/BaseTools -j"$(nproc)"
           } 2>&1 | tee -a ci.log
 
-      # Sin "set -u" (edksetup.sh no es seguro). Se redirige con ">>" a ci.log en
-      # vez de encadenar a tee: al ir en un grupo con redireccion (no subshell)
-      # se garantiza que TODO quede en el log, pase lo que pase.
+      # La salida del build se filtra a si misma y se publica como anotaciones
+      # en vivo: es el unico canal legible sin token. No dependemos de que un
+      # fichero sobreviva hasta el paso de resumen.
       - name: Build del driver
         run: |
-          rc=0
+          set +e
+          export WORKSPACE="$PWD"
+          export EDK_TOOLS_PATH="$PWD/edk2/BaseTools"
+          export PACKAGES_PATH="$PWD/edk2:$PWD"
           {
             echo "=== build driver ==="
-            export WORKSPACE="$PWD"
-            export EDK_TOOLS_PATH="$PWD/edk2/BaseTools"
-            export PACKAGES_PATH="$PWD/edk2:$PWD"
             source edk2/edksetup.sh BaseTools
             echo "edksetup rc=$?"
             build -p IntVMD.dsc -a X64 -t GCC5 -b RELEASE
-            rc=$?
-            echo "build rc=$rc"
-          } >> ci.log 2>&1
-          exit $rc
+            echo "build rc=$?"
+          } 2>&1 | tee build-driver.log
+          rc=${PIPESTATUS[0]}
+          echo "=== lineas del log: $(wc -l < build-driver.log) ==="
+          {
+            grep -inE "error|undefined reference|no such file|not found|fatal|Traceback|Unsupported|ASSERT|invalid" build-driver.log | head -25
+            echo "--- mismas/ultimas lineas ---"
+            tail -15 build-driver.log
+          } | while IFS= read -r line; do
+            echo "::error title=bld::$(echo "$line" | tr -d '\r' | cut -c1-220)"
+          done
+          exit "${rc:-1}"
 
       - name: Verificar artefacto
         run: |
