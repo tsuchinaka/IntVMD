@@ -63,9 +63,17 @@ VmdTrace (
   IN CONST CHAR8  *Step
   );
 
-/** Escribe una linea a la consola del firmware (ConOut directo). */
+/** Escribe una linea a la consola del firmware (ConOut directo).
+OJO ABI (verificado): en X64 EDK2 define VA_LIST como __builtin_ms_va_list y
+Base.h EXIGE que toda funcion que llame a VA_START() sea EFIAPI
+(= __attribute__((ms_abi))). Sin EFIAPI esta funcion compila en SysV y el
+VA_LIST resultante apunta a basura -> AsciiVSPrint itera punteros salvajes y
+la maquina se congela. AsciiSPrint directo funciona porque SU VA_START esta
+dentro de EDK2 (compilado con EFIAPI). Por eso esta declaracion lleva EFIAPI
+en definicion (no hay declaracion separada). */
 STATIC
 VOID
+EFIAPI
 VmdLog (
   IN CONST CHAR8  *Format,
   ...
