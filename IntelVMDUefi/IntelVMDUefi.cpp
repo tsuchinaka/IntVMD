@@ -32,6 +32,13 @@
 
 #include "VMDLogic.hpp"
 
+// En C++ (g++) el literal L"..." tiene tipo `const wchar_t*`, mientras que
+// Print()/DEBUG() exigen `const CHAR16*` (unsigned short). Con -fshort-wchar
+// la representacion es identica (2 bytes) y solo cambia el TIPO, por lo que
+// basta una conversion. Envolvemos Print para no castear en cada llamada.
+#define VMD_PRINT(fmt, ...)  Print ((CONST CHAR16 *)(fmt), __VA_ARGS__)
+#define VMD_PRINT0(fmt)      Print ((CONST CHAR16 *)(fmt))
+
 #define INTEL_VMD_VENDOR_ID  0x8086
 
 // Controladores VMD soportados. i3-1115G4 (Tiger Lake) = 9A0B. Extensible a
@@ -131,7 +138,7 @@ EnumerateVmdBus (
   Found    = 0;
   BusCount = vmd_cfgbar_bus_count (VMD_CFGBAR_SIZE, BusStart);
 
-  Print (L"IntelVMD-UEFI: ECAM cubre %u buses desde %u\n", BusCount, BusStart);
+  VMD_PRINT (L"IntelVMD-UEFI: ECAM cubre %u buses desde %u\n", BusCount, BusStart);
 
   for (BusIndex = 0; BusIndex < BusCount; ++BusIndex) {
     UINT8  Bus = (UINT8)(BusStart + BusIndex);
@@ -161,7 +168,7 @@ EnumerateVmdBus (
           continue;
         }
 
-        Print (
+        VMD_PRINT (
           L"IntelVMD-UEFI:   bus %3u devfn %02x  %04x:%04x\n",
           Bus,
           DevFn,
@@ -292,14 +299,14 @@ IntelVMDUefiStart (
   Regs     = vmd_decode (VmCap, VmConfig);
   BusStart = vmd_bus_start (Regs.bus_restrict_cap, Regs.bus_restrict_cfg);
 
-  Print (
+  VMD_PRINT (
     L"IntelVMD-UEFI: attach 8086:%04x VMCAP=%04x VMCONFIG=%04x VMLOCK=%08x\n",
     DeviceId,
     VmCap,
     VmConfig,
     VmLock
     );
-  Print (
+  VMD_PRINT (
     L"IntelVMD-UEFI: busStart=%u msiRemap=%u canBypass=%u busRestrictCap=%u cfg=%u\n",
     BusStart,
     Regs.msi_remap_enabled ? 1U : 0U,
@@ -309,22 +316,22 @@ IntelVMDUefiStart (
     );
 
   if (BusStart == 0xFF) {
-    Print (L"IntelVMD-UEFI: configuracion desconocida (busStart=0xFF); no se enumera\n");
+    VMD_PRINT0 (L"IntelVMD-UEFI: configuracion desconocida (busStart=0xFF); no se enumera\n");
     return EFI_SUCCESS;
   }
 
   PciIo->Pci.Read (PciIo, EfiPciIoWidthUint32, VMD_CFGBAR_REG, 1, &Bar0);
   CfgBarBase = (UINT64)(Bar0 & 0xFFFFFFF0U);   // CFGBAR es de 32 MB, alineada
 
-  Print (L"IntelVMD-UEFI: CFGBAR base = 0x%Lx\n", CfgBarBase);
+  VMD_PRINT (L"IntelVMD-UEFI: CFGBAR base = 0x%Lx\n", CfgBarBase);
 
   if (CfgBarBase == 0) {
-    Print (L"IntelVMD-UEFI: BAR0 sin asignar; no se enumera\n");
+    VMD_PRINT0 (L"IntelVMD-UEFI: BAR0 sin asignar; no se enumera\n");
     return EFI_SUCCESS;
   }
 
   Found = EnumerateVmdBus (CfgBarBase, BusStart);
-  Print (L"IntelVMD-UEFI: %u dispositivos en la ECAM del VMD\n", Found);
+  VMD_PRINT (L"IntelVMD-UEFI: %u dispositivos en la ECAM del VMD\n", Found);
 
   // Fase 2 (pendiente): publicar EFI_PCI_ROOT_BRIDGE_IO_PROTOCOL +
   // EFI_PCI_HOST_BRIDGE_RESOURCE_ALLOCATION para que PciBusDxe enumere y
