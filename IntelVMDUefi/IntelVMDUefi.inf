@@ -30,6 +30,7 @@
   BaseLib
   BaseMemoryLib
   MemoryAllocationLib
+  PrintLib
   UefiBootServicesTableLib
   UefiLib
   VMDCore
@@ -37,3 +38,6 @@
 [Protocols]
   gEfiDriverBindingProtocolGuid
   gEfiPciIoProtocolGuid
+  gEfiDevicePathProtocolGuid
+  gEfiDevicePathToTextProtocolGuid
+  gEfiLoadedImageProtocolGuid

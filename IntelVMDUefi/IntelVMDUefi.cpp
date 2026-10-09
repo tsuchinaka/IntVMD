@@ -1,27 +1,32 @@
 /** @file
-  Driver UEFI (DXE) de Intel VMD — Fase 1.
+  Driver UEFI (DXE) de Intel VMD — Fase 1 + diagnostico.
 
   OpenCore lo carga desde UEFI.Drivers. Engancha el controlador VMD
-  (8086:9A0B), mapea la CFGBAR (BAR0), decodifica VMCAP/VMCONFIG/VMLOCK y
-  recorre la ECAM del bus oculto imprimiendo cada dispositivo que encuentra.
+  (8086:9A0B), mapea la CFGBAR, decodifica VMCAP/VMCONFIG/VMLOCK y recorre la
+  ECAM del bus oculto.
 
-  Es el equivalente UEFI de la Fase 2a del kext: valida sobre hardware real
-  que el direccionamiento ECAM y el rango de buses son correctos.
+  TRAZAS: la salida de consola de un driver NO se guarda en el fichero de log
+  de OpenCore (OcConsoleLib solo reenvia al ConOut original). Por eso aqui se
+  escribe con el protocolo OcLog (DBB6008F-89E4-4272-9881-CE3AFD9724D0), que es
+  el mismo canal que usa OpenCore para su log: las lineas acaban en el fichero
+  opencore-*.txt de la ESP. Si el protocolo no existe, se cae a la consola.
+
+  MODO DIAGNOSTICO (UEFI.Drivers[i].Arguments = "diag"): recorre TODOS los
+  handles con device-path y llama a ConnectController uno a uno, registrando en
+  el log antes y despues de cada uno. Si el arranque se cuelga, la ULTIMA linea
+  del log identifica el handle exacto que cuelga (y el driver que intenta
+  bindearlo). Sin el argumento no hace nada de esto.
 
   La logica VMD (matematica ECAM, decodificacion de VMCAP/VMCONFIG, reglas de
   MSI remap) vive en VMDCore/VMDLogic.*, la MISMA fuente que usa el kext de
   macOS. Aqui solo se pone el acceso MMIO/PCI del plano UEFI.
-
-  Uso: config.plist -> UEFI -> Drivers, entrada IntelVMDUefi.efi (Enabled).
-  Salida: por Print() (consola de OpenCore) y DEBUG().
 **/
 
-// Los headers de EDK2 son C puro: NO llevan `extern "C"` (comprobado en
-// MdePkg/Include/Library/UefiLib.h). Si se incluyen tal cual desde un .cpp, en
-// C++ se declaran con enlazado C++ y el linker busca el nombre manglado
-// (`Print(unsigned short const*, ...)`), mientras que MdePkg exporta el
-// simbolo C `Print` -> "undefined reference". Envolviendolos en extern "C" el
-// enlazado vuelve a ser C y los simbolos casan.
+// Los headers de EDK2 son C puro: NO llevan `extern "C"` (verificado en
+// MdePkg/Include/Library/UefiLib.h). Incluidos tal cual desde un .cpp, en C++
+// se declaran con enlazado C++ y el linker busca el nombre manglado
+// (`Print(unsigned short const*, ...)`) mientras que MdePkg exporta el simbolo
+// C `Print` -> "undefined reference". Envolviendolos, el enlazado vuelve a C.
 extern "C" {
 #include <Uefi.h>
 
@@ -29,39 +34,107 @@ extern "C" {
 #include <Library/BaseMemoryLib.h>
 #include <Library/DebugLib.h>
 #include <Library/MemoryAllocationLib.h>
+#include <Library/PrintLib.h>
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiDriverEntryPoint.h>
 #include <Library/UefiLib.h>
 
 #include <IndustryStandard/Pci.h>
+#include <Protocol/DevicePath.h>
+#include <Protocol/DevicePathToText.h>
 #include <Protocol/DriverBinding.h>
+#include <Protocol/LoadedImage.h>
 #include <Protocol/PciIo.h>
 }
 
 #include "VMDLogic.hpp"
 
-// En C++ (g++) el literal L"..." tiene tipo `const wchar_t*`, mientras que
-// Print()/DEBUG() exigen `const CHAR16*` (unsigned short). Con -fshort-wchar
-// la representacion es identica (2 bytes) y solo cambia el TIPO, por lo que
-// basta una conversion. Envolvemos Print para no castear en cada llamada.
-#define VMD_PRINT(fmt, ...)  Print ((CONST CHAR16 *)(fmt), __VA_ARGS__)
-#define VMD_PRINT0(fmt)      Print ((CONST CHAR16 *)(fmt))
-
 #define INTEL_VMD_VENDOR_ID  0x8086
 
-// Controladores VMD soportados. i3-1115G4 (Tiger Lake) = 9A0B. Extensible a
-// AD0B (Alder Lake), 7D0B, 28Cx (server) sin tocar la logica.
-STATIC CONST UINT16  mSupportedDevices[] = { 0x9A0B };
+// ---------------------------------------------------------------------------
+// Canal de trazas: protocolo OcLog de OpenCore.
+// Copia local de Include/Acidanthera/Protocol/OcLog.h para no depender de
+// OpenCorePkg en el INF (mismo layout, X64).
+// ---------------------------------------------------------------------------
+#define VMD_OC_LOG_GUID                                    \
+  {                                                        \
+    0xDBB6008F, 0x89E4, 0x4272, {                          \
+      0x98, 0x81, 0xCE, 0x3A, 0xFD, 0x97, 0x24, 0xD0       \
+    }                                                      \
+  }
 
-// Registros del propio controlador VMD (Intel VMD Technical Document / vmd.c).
-#define VMD_REG_VMCAP        0x40
-#define VMD_REG_VMCONFIG     0x44
-#define VMD_REG_VMLOCK       0x70
-#define VMD_CFGBAR_INDEX     0    // BAR0 = CFGBAR (ventana ECAM)
-#define VMD_CFGBAR_REG       0x10 // offset de BAR0 en config space
+#define VMD_OC_LOG_REVISION  0x01000B
 
-// Tamano observado de la CFGBAR en 9A0B (spec / dump de recursos Windows).
-#define VMD_CFGBAR_SIZE      0x2000000ULL  // 32 MB
+typedef EFI_STATUS(EFIAPI *VMD_LOG_ADD_ENTRY)(
+  VOID *, UINTN, CONST CHAR8 *, VA_LIST
+  );
+
+typedef struct {
+  UINT32                Revision;
+  UINTN                 Reserved;
+  VMD_LOG_ADD_ENTRY     AddEntry;
+  VOID                  *GetLog;
+  VOID                  *SaveLog;
+  VOID                  *ResetTimers;
+  UINT32                Options;
+  UINT32                DisplayDelay;
+  UINTN                 DisplayLevel;
+  UINTN                 HaltLevel;
+  VOID                  *FileSystem;
+  VOID                  *FilePath;
+  VOID                  *UnsafeLogFile;
+} VMD_OC_LOG;
+
+STATIC EFI_GUID    mVmdLogGuid = VMD_OC_LOG_GUID;
+STATIC VMD_OC_LOG  *mVmdLog    = NULL;
+STATIC BOOLEAN     mDiag       = FALSE;
+
+STATIC
+VOID
+VmdLogInit (
+  VOID
+  )
+{
+  EFI_STATUS  Status;
+
+  Status = gBS->LocateProtocol (&mVmdLogGuid, NULL, (VOID **)&mVmdLog);
+  if (!EFI_ERROR (Status) && (mVmdLog != NULL)) {
+    if (mVmdLog->Revision != VMD_OC_LOG_REVISION) {
+      mVmdLog = NULL;
+    }
+
+    return;
+  }
+
+  mVmdLog = NULL;
+}
+
+/** Escribe una linea: al log de OpenCore si esta, si no a la consola. */
+STATIC
+VOID
+VmdLog (
+  IN CONST CHAR8  *Format,
+  ...
+  )
+{
+  VA_LIST  Marker;
+  CHAR8    Ascii[256];
+  CHAR16   Wide[256];
+
+  VA_START (Marker, Format);
+
+  if (mVmdLog != NULL) {
+    mVmdLog->AddEntry (mVmdLog, DEBUG_INFO, Format, Marker);
+  } else {
+    AsciiVSPrint (Ascii, sizeof (Ascii), Format, Marker);
+    AsciiStrToUnicodeStrS (Ascii, Wide, ARRAY_SIZE (Wide));
+    if (gST->ConOut != NULL) {
+      gST->ConOut->OutputString (gST->ConOut, Wide);
+    }
+  }
+
+  VA_END (Marker);
+}
 
 // ---------------------------------------------------------------------------
 // Driver binding
@@ -104,9 +177,18 @@ STATIC EFI_DRIVER_BINDING_PROTOCOL  mIntelVMDUefiDriverBinding = {
   NULL
 };
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+// Controladores VMD soportados. i3-1115G4 (Tiger Lake) = 9A0B. Extensible a
+// AD0B (Alder Lake), 7D0B, 28Cx (server) sin tocar la logica.
+STATIC CONST UINT16  mSupportedDevices[] = { 0x9A0B };
+
+// Registros del propio controlador VMD (Intel VMD Technical Document / vmd.c).
+#define VMD_REG_VMCAP        0x40
+#define VMD_REG_VMCONFIG     0x44
+#define VMD_REG_VMLOCK       0x70
+#define VMD_CFGBAR_REG       0x10 // offset de BAR0 en config space
+
+// Tamano observado de la CFGBAR en 9A0B (spec / dump de recursos Windows).
+#define VMD_CFGBAR_SIZE      0x2000000ULL  // 32 MB
 
 STATIC
 BOOLEAN
@@ -125,16 +207,60 @@ IsSupportedDevice (
   return FALSE;
 }
 
+/** Devuelve el device-path como ASCII (o NULL). El llamante libera con FreePool. */
+STATIC
+CHAR8 *
+VmdDevicePathToAscii (
+  IN EFI_DEVICE_PATH_PROTOCOL  *Dp
+  )
+{
+  EFI_DEVICE_PATH_TO_TEXT_PROTOCOL  *DpToText;
+  CHAR16                            *Text;
+  CHAR8                             *Ascii;
+  UINTN                             Size;
+
+  if ((Dp == NULL) || (gBS == NULL)) {
+    return NULL;
+  }
+
+  if (EFI_ERROR (
+        gBS->LocateProtocol (
+               &gEfiDevicePathToTextProtocolGuid,
+               NULL,
+               (VOID **)&DpToText
+               )
+        )
+      || (DpToText == NULL))
+  {
+    return NULL;
+  }
+
+  Text = DpToText->ConvertDevicePathToText (Dp, TRUE, TRUE);
+  if (Text == NULL) {
+    return NULL;
+  }
+
+  Size  = StrLen (Text) + 1;
+  Ascii = (CHAR8 *)AllocatePool (Size);
+  if (Ascii != NULL) {
+    UnicodeStrToAsciiStrS (Text, Ascii, Size);
+  }
+
+  FreePool (Text);
+  return Ascii;
+}
+
 /**
   Recorre la ECAM del dominio VMD y registra cada dispositivo presente.
-  El acceso a config-space es un read de dword en la ventana mapeada:
-    addr = cfgbar + vmd_ecam_offset(bus, busStart, devfn, 0)
+  El acceso a config-space es un read de dword por PciIo->Mem.Read (NO se
+  desreferencia la direccion fisica de la BAR: en UEFI no tiene por que estar
+  mapeada 1:1 y el deref crudo puede colgar).
 **/
 STATIC
 UINT32
 EnumerateVmdBus (
-  IN UINT64   CfgBarBase,
-  IN UINT8    BusStart
+  IN EFI_PCI_IO_PROTOCOL  *PciIo,
+  IN UINT8                BusStart
   )
 {
   UINT32  Found;
@@ -146,17 +272,17 @@ EnumerateVmdBus (
   Found    = 0;
   BusCount = vmd_cfgbar_bus_count (VMD_CFGBAR_SIZE, BusStart);
 
-  VMD_PRINT (L"IntelVMD-UEFI: ECAM cubre %u buses desde %u\n", BusCount, BusStart);
+  VmdLog ("IntelVMD-UEFI: ECAM cubre %u buses desde %u\n", BusCount, BusStart);
 
   for (BusIndex = 0; BusIndex < BusCount; ++BusIndex) {
     UINT8  Bus = (UINT8)(BusStart + BusIndex);
 
     for (Dev = 0; Dev < 32; ++Dev) {
       for (Fn = 0; Fn < 8; ++Fn) {
-        UINT8                       DevFn;
-        UINT32                      Offset;
-        volatile UINT32             *Reg;
-        UINT32                      Id;
+        UINT8        DevFn;
+        UINT32       Offset;
+        UINT32       Id;
+        EFI_STATUS   Status;
 
         DevFn  = (UINT8)((Dev << 3) | Fn);
         Offset = vmd_ecam_offset (Bus, BusStart, DevFn, 0);
@@ -164,11 +290,16 @@ EnumerateVmdBus (
           continue;
         }
 
-        Reg = (volatile UINT32 *)(UINTN)(CfgBarBase + Offset);
-        Id  = *Reg;
-
-        if ((Id & 0xFFFFU) == 0xFFFFU || vmd_config_is_empty (Id)) {
-          // Funcion ausente: si es la fn0, el resto del dispositivo tampoco.
+        Id     = 0xFFFFFFFFU;
+        Status = PciIo->Mem.Read (
+                          PciIo,
+                          EfiPciIoWidthUint32,
+                          Offset,
+                          1,
+                          &Id
+                          );
+        if (EFI_ERROR (Status)) {
+          VmdLog ("IntelVMD-UEFI:   mem.read fallo %u/%02x -> %r\n", Bus, DevFn, Status);
           if (Fn == 0) {
             break;
           }
@@ -176,8 +307,16 @@ EnumerateVmdBus (
           continue;
         }
 
-        VMD_PRINT (
-          L"IntelVMD-UEFI:   bus %3u devfn %02x  %04x:%04x\n",
+        if (vmd_config_is_empty (Id)) {
+          if (Fn == 0) {
+            break;
+          }
+
+          continue;
+        }
+
+        VmdLog (
+          "IntelVMD-UEFI:   bus %3u devfn %02x  %04x:%04x\n",
           Bus,
           DevFn,
           (UINT16)(Id & 0xFFFFU),
@@ -189,6 +328,65 @@ EnumerateVmdBus (
   }
 
   return Found;
+}
+
+// ---------------------------------------------------------------------------
+// Modo diagnostico: conectar los handles uno a uno, trazeando cada paso.
+// ---------------------------------------------------------------------------
+
+STATIC
+VOID
+VmdDiagnoseConnect (
+  VOID
+  )
+{
+  EFI_STATUS  Status;
+  EFI_HANDLE  *HandleBuffer;
+  UINTN       HandleCount;
+  UINTN       Index;
+
+  HandleBuffer = NULL;
+  HandleCount  = 0;
+
+  Status = gBS->LocateHandleBuffer (
+                  ByProtocol,
+                  &gEfiDevicePathProtocolGuid,
+                  NULL,
+                  &HandleCount,
+                  &HandleBuffer
+                  );
+  if (EFI_ERROR (Status)) {
+    VmdLog ("IntelVMD-UEFI: DIAG LocateHandleBuffer -> %r\n", Status);
+    return;
+  }
+
+  VmdLog ("IntelVMD-UEFI: DIAG %u handles con device-path\n", HandleCount);
+
+  for (Index = 0; Index < HandleCount; ++Index) {
+    EFI_DEVICE_PATH_PROTOCOL  *Dp;
+    CHAR8                     *Text;
+
+    Dp = NULL;
+    gBS->HandleProtocol (HandleBuffer[Index], &gEfiDevicePathProtocolGuid, (VOID **)&Dp);
+
+    Text = VmdDevicePathToAscii (Dp);
+    VmdLog (
+      "IntelVMD-UEFI: DIAG connect [%u/%u] %a\n",
+      Index,
+      HandleCount,
+      (Text != NULL) ? Text : "<sin devpath>"
+      );
+    if (Text != NULL) {
+      FreePool (Text);
+    }
+
+    // Si el cuelgue esta aqui, la ultima linea del log es la de arriba.
+    Status = gBS->ConnectController (HandleBuffer[Index], NULL, NULL, TRUE);
+    VmdLog ("IntelVMD-UEFI: DIAG   -> %r\n", Status);
+  }
+
+  FreePool (HandleBuffer);
+  VmdLog ("IntelVMD-UEFI: DIAG fin del recorrido\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +443,7 @@ IntelVMDUefiSupported (
   if (Pci.Hdr.VendorId == INTEL_VMD_VENDOR_ID) {
     if (IsSupportedDevice (Pci.Hdr.DeviceId)) {
       Status = EFI_SUCCESS;
+      VmdLog ("IntelVMD-UEFI: supported 8086:%04x\n", Pci.Hdr.DeviceId);
     }
   }
 
@@ -279,6 +478,8 @@ IntelVMDUefiStart (
   UINT8                BusStart;
   UINT32               Found;
 
+  VmdLog ("IntelVMD-UEFI: start()\n");
+
   Status = gBS->OpenProtocol (
                   ControllerHandle,
                   &gEfiPciIoProtocolGuid,
@@ -288,16 +489,18 @@ IntelVMDUefiStart (
                   EFI_OPEN_PROTOCOL_BY_DRIVER
                   );
   if (EFI_ERROR (Status)) {
+    VmdLog ("IntelVMD-UEFI: start: OpenProtocol -> %r\n", Status);
     return Status;
   }
 
   // Habilitar el decoding de memoria: sin esto la CFGBAR no responde.
-  PciIo->Attributes (
-           PciIo,
-           EfiPciIoAttributeOperationEnable,
-           EFI_PCI_IO_ATTRIBUTE_MEMORY,
-           NULL
-           );
+  Status = PciIo->Attributes (
+                    PciIo,
+                    EfiPciIoAttributeOperationEnable,
+                    EFI_PCI_IO_ATTRIBUTE_MEMORY,
+                    NULL
+                    );
+  VmdLog ("IntelVMD-UEFI: start: Attributes -> %r\n", Status);
 
   PciIo->Pci.Read (PciIo, EfiPciIoWidthUint16, PCI_DEVICE_ID_OFFSET, 1, &DeviceId);
   PciIo->Pci.Read (PciIo, EfiPciIoWidthUint16, VMD_REG_VMCAP, 1, &VmCap);
@@ -307,15 +510,15 @@ IntelVMDUefiStart (
   Regs     = vmd_decode (VmCap, VmConfig);
   BusStart = vmd_bus_start (Regs.bus_restrict_cap, Regs.bus_restrict_cfg);
 
-  VMD_PRINT (
-    L"IntelVMD-UEFI: attach 8086:%04x VMCAP=%04x VMCONFIG=%04x VMLOCK=%08x\n",
+  VmdLog (
+    "IntelVMD-UEFI: attach 8086:%04x VMCAP=%04x VMCONFIG=%04x VMLOCK=%08x\n",
     DeviceId,
     VmCap,
     VmConfig,
     VmLock
     );
-  VMD_PRINT (
-    L"IntelVMD-UEFI: busStart=%u msiRemap=%u canBypass=%u busRestrictCap=%u cfg=%u\n",
+  VmdLog (
+    "IntelVMD-UEFI: busStart=%u msiRemap=%u canBypass=%u busRestrictCap=%u cfg=%u\n",
     BusStart,
     Regs.msi_remap_enabled ? 1U : 0U,
     vmd_can_bypass_msi_remap ((UINT32)DeviceId << 16 | INTEL_VMD_VENDOR_ID) ? 1U : 0U,
@@ -324,22 +527,22 @@ IntelVMDUefiStart (
     );
 
   if (BusStart == 0xFF) {
-    VMD_PRINT0 (L"IntelVMD-UEFI: configuracion desconocida (busStart=0xFF); no se enumera\n");
+    VmdLog ("IntelVMD-UEFI: configuracion desconocida (busStart=0xFF); no se enumera\n");
     return EFI_SUCCESS;
   }
 
   PciIo->Pci.Read (PciIo, EfiPciIoWidthUint32, VMD_CFGBAR_REG, 1, &Bar0);
-  CfgBarBase = (UINT64)(Bar0 & 0xFFFFFFF0U);   // CFGBAR es de 32 MB, alineada
+  CfgBarBase = (UINT64)(Bar0 & 0xFFFFFFF0U);
 
-  VMD_PRINT (L"IntelVMD-UEFI: CFGBAR base = 0x%Lx\n", CfgBarBase);
+  VmdLog ("IntelVMD-UEFI: CFGBAR base = 0x%Lx (BAR0=%08x)\n", CfgBarBase, Bar0);
 
   if (CfgBarBase == 0) {
-    VMD_PRINT0 (L"IntelVMD-UEFI: BAR0 sin asignar; no se enumera\n");
+    VmdLog ("IntelVMD-UEFI: BAR0 sin asignar; no se enumera\n");
     return EFI_SUCCESS;
   }
 
-  Found = EnumerateVmdBus (CfgBarBase, BusStart);
-  VMD_PRINT (L"IntelVMD-UEFI: %u dispositivos en la ECAM del VMD\n", Found);
+  Found = EnumerateVmdBus (PciIo, BusStart);
+  VmdLog ("IntelVMD-UEFI: %u dispositivos en la ECAM del VMD\n", Found);
 
   // Fase 2 (pendiente): publicar EFI_PCI_ROOT_BRIDGE_IO_PROTOCOL +
   // EFI_PCI_HOST_BRIDGE_RESOURCE_ALLOCATION para que PciBusDxe enumere y
@@ -370,12 +573,48 @@ IntelVMDUefiStop (
 // Entry point
 // ---------------------------------------------------------------------------
 
+STATIC
+VOID
+ReadOwnArguments (
+  IN EFI_HANDLE  ImageHandle
+  )
+{
+  EFI_LOADED_IMAGE_PROTOCOL  *LoadedImage;
+  EFI_STATUS                 Status;
+
+  LoadedImage = NULL;
+  Status      = gBS->OpenProtocol (
+                       ImageHandle,
+                       &gEfiLoadedImageProtocolGuid,
+                       (VOID **)&LoadedImage,
+                       ImageHandle,
+                       NULL,
+                       EFI_OPEN_PROTOCOL_GET_PROTOCOL
+                       );
+  if (EFI_ERROR (Status) || (LoadedImage == NULL) || (LoadedImage->LoadOptions == NULL)) {
+    return;
+  }
+
+  if (AsciiStrStr ((CONST CHAR8 *)LoadedImage->LoadOptions, "diag") != NULL) {
+    mDiag = TRUE;
+  }
+}
+
 extern "C" EFI_STATUS EFIAPI
 IntelVMDUefiEntryPoint (
   IN EFI_HANDLE        ImageHandle,
   IN EFI_SYSTEM_TABLE  *SystemTable
   )
 {
+  VmdLogInit ();
+  ReadOwnArguments (ImageHandle);
+
+  VmdLog ("IntelVMD-UEFI: entry point (log=%a diag=%u)\n", (mVmdLog != NULL) ? "ok" : "no", mDiag ? 1U : 0U);
+
+  if (mDiag) {
+    VmdDiagnoseConnect ();
+  }
+
   return EfiLibInstallDriverBinding (
            ImageHandle,
            SystemTable,
