@@ -123,14 +123,38 @@ VmdLog (
 
   VA_START (Marker, Format);
 
+  VmdTrace ("VL-enter");
   if (mVmdLog != NULL) {
+    CHAR8   Info[128];
+    CHAR16  WInfo[128];
+
+    // Valor del puntero y revision: si es basura, esta lectura ya informa
+    // (un puntero invalido aqui explicaria un cuelgue/fallo en AddEntry).
+    AsciiSPrint (
+      Info,
+      sizeof (Info),
+      "IntelVMD-UEFI: [trace] VL-oclog=%p rev=%x\r\n",
+      (VOID *)mVmdLog,
+      mVmdLog->Revision
+      );
+    AsciiStrToUnicodeStrS (Info, WInfo, ARRAY_SIZE (WInfo));
+    if ((gST != NULL) && (gST->ConOut != NULL)) {
+      gST->ConOut->OutputString (gST->ConOut, WInfo);
+    }
+
+    VmdTrace ("VL-calling-AddEntry");
     mVmdLog->AddEntry (mVmdLog, DEBUG_INFO, Format, Marker);
+    VmdTrace ("VL-afterAdd");
   } else {
+    VmdTrace ("VL-null-fallback");
     AsciiVSPrint (Ascii, sizeof (Ascii), Format, Marker);
+    VmdTrace ("VL-afterVSPrint");
     AsciiStrToUnicodeStrS (Ascii, Wide, ARRAY_SIZE (Wide));
     if (gST->ConOut != NULL) {
       gST->ConOut->OutputString (gST->ConOut, Wide);
     }
+
+    VmdTrace ("VL-afterConOut");
   }
 
   VA_END (Marker);
