@@ -46,19 +46,24 @@ jobs:
             make -C edk2/BaseTools -j"$(nproc)"
           } 2>&1 | tee -a ci.log
 
-      # Sin "set -u": edksetup.sh no es seguro ante variables no definidas y
-      # aborta en silencio. Todo va en un solo paso para no perder la salida.
+      # Sin "set -u" (edksetup.sh no es seguro). Se redirige con ">>" a ci.log en
+      # vez de encadenar a tee: al ir en un grupo con redireccion (no subshell)
+      # se garantiza que TODO quede en el log, pase lo que pase.
       - name: Build del driver
         run: |
-          set -eo pipefail
+          rc=0
           {
             echo "=== build driver ==="
             export WORKSPACE="$PWD"
             export EDK_TOOLS_PATH="$PWD/edk2/BaseTools"
             export PACKAGES_PATH="$PWD/edk2:$PWD"
             source edk2/edksetup.sh BaseTools
+            echo "edksetup rc=$?"
             build -p IntVMD.dsc -a X64 -t GCC5 -b RELEASE
-          } 2>&1 | tee -a ci.log
+            rc=$?
+            echo "build rc=$rc"
+          } >> ci.log 2>&1
+          exit $rc
 
       - name: Verificar artefacto
         run: |
