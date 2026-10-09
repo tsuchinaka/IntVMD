@@ -598,6 +598,20 @@ IntelVMDUefiEntryPoint (
     VmdTrace ("3-diag-start");
     VmdDiagnoseConnect ();
     VmdTrace ("3-diag-done");
+
+    // Pausa con las trazas en pantalla: el arranque NO sigue hasta pulsar
+    // una tecla. Asi la foto es obligatoria y completa (las lineas de
+    // consola no quedan en ningun fichero).
+    VmdLog ("IntelVMD-UEFI: DIAG completo. Pulsa una tecla para seguir...\n");
+    if ((gST != NULL) && (gST->ConIn != NULL)) {
+      UINTN      Index;
+      EFI_INPUT_KEY  Key;
+
+      gBS->WaitForEvent (1, &gST->ConIn->WaitForKey, &Index);
+      gST->ConIn->ReadKeyStroke (gST->ConIn, &Key);
+    }
+
+    VmdTrace ("3-key-pressed");
   }
 
   Status = EfiLibInstallDriverBinding (
